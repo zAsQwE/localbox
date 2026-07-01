@@ -1,0 +1,7 @@
+# LocalBox launcher использует только стандартную библиотеку Python 3.8+.
+# Внешних пакетов не требуется (tkinter, ssl, subprocess, json, pathlib — все из stdlib).
+#
+# Примечание: на некоторых дистрибутивах Linux tkinter ставится отдельным пакетом ОС:
+#   Debian/Ubuntu:  sudo apt install python3-tk
+#   Fedora:         sudo dnf install python3-tkinter
+#   Arch:           sudo pacman -S tk

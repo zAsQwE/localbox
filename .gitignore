@@ -1,0 +1,34 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Локальные артефакты (генерируются лаунчером — не публикуются)
+config.json
+certs/
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Бэкапы патчей игр
+*.localbox-backup
+
+# Кэш/временное
+cache/
+*.part
+
+# Большие веб-клиенты (ассеты Jackbox) — скачиваются отдельно из источников, см. README.
+# НЕ коммитим: слишком велики и не наши.
+client/
+client-ru/
+client-fun/
+runtime/
+
+# ВНИМАНИЕ: папку launcher/ и её билды (dist/, *.exe) НЕ игнорируем — они публикуются.
