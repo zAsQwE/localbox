@@ -1,0 +1,34 @@
+{
+  "$comment": "Скопируйте этот файл в config.json (рядом) или укажите путь через LOCALBOX_CONFIG. Обычно его заполняет Python-лаунчер.",
+
+  "host": "localhost",
+  "$comment_host": "Хост, по которому игра и телефоны видят сервер. В режиме 'без домена' это localhost/IP, в режиме 'свой домен' — ваш домен.",
+
+  "httpPort": 80,
+  "httpsPort": 443,
+  "$comment_ports": "Реальные игры Jackbox ходят на 443 (wss). 80 используется для редиректа/портала. Можно поменять для отладки.",
+
+  "tls": {
+    "enabled": true,
+    "cert": "certs/localbox.pem",
+    "key": "certs/localbox-key.pem"
+  },
+  "$comment_tls": "Если enabled=false — сервер поднимается на HTTP (только для локальной отладки ядра, реальные игры требуют wss).",
+
+  "defaultLocale": "ru",
+  "$comment_locale": "Язык стартового экрана/портала: 'ru' или 'en'. Контент самих игр берётся из Steam.",
+
+  "roomCodeLength": 4,
+  "$comment_roomcode": "Длина генерируемого кода комнаты (Jackbox использует 4 заглавные буквы).",
+
+  "proxy": {
+    "enabled": false,
+    "webHosts": ["jackbox.tv", "www.jackbox.tv", "bundles.jackbox.tv", "cdn.jackboxgames.com", "jackbox.fun", "www.jackbox.fun"],
+    "rewriteHosts": ["ecast.jackboxgames.com", "api.jackbox.tv", "jack.fenst4r.live"],
+    "doh": "https://1.1.1.1/dns-query",
+    "playUrls": { "ru": "https://jackbox.fun/", "en": "https://jackbox.tv/" },
+    "playUrl": "https://jackbox.tv/",
+    "cacheDir": "cache/proxy"
+  },
+  "$comment_proxy": "Раздача веб-клиента телефонам с КЭШЕМ для оффлайн-игры. enabled=true: cache-first — если ассет уже в cacheDir, отдаётся с диска БЕЗ интернета; иначе докачивается (через DoH), сохраняется в кэш (зеркально по host/пути — видно деление по играм). playUrls: куда вести по кнопке «Играть» по языку (ru -> русский клиент jackbox.fun, en -> jackbox.tv). API-пути (/api, /socket.io, /room) НЕ проксируются — на них отвечает наш сервер. Один раз прогрейте онлайн (Disable cache в DevTools), дальше оффлайн. Телефоны должны резолвить домены Jackbox/jackbox.fun на этот сервер (DNS роутера)."
+}
