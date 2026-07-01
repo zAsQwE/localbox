@@ -88,17 +88,8 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def server_dir() -> Path:
-    return repo_root() / "server"
-
-
 def certs_dir() -> Path:
     return repo_root() / "certs"
-
-
-def config_path() -> Path:
-    """config.json в корне репо (его читает сервер)."""
-    return repo_root() / "config.json"
 
 
 def steam_library_candidates():

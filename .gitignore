@@ -31,4 +31,8 @@ client-ru/
 client-fun/
 runtime/
 
-# ВНИМАНИЕ: папку launcher/ и её билды (dist/, *.exe) НЕ игнорируем — они публикуются.
+# Сборки PyInstaller — НЕ коммитим (быстро устаревают и ломают пути).
+# Собирай exe заново (launcher/build-exe.sh) или через GitHub Actions/Releases.
+launcher/build/
+launcher/dist/
+*.spec
