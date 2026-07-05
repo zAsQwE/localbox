@@ -1,0 +1,16 @@
+{
+    "name": "localbox-server",
+    "version": "0.1.0",
+    "description": "LocalBox — собственный сервер для игр Jackbox (протокол Ecast / API v2)",
+    "license": "Unlicense",
+    "private": true,
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "express": "^4.19.2",
+        "ws": "^8.18.0",
+        "yjs": "^13.6.31"
+    }
+}

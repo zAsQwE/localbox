@@ -3,10 +3,10 @@
 #   Copyright (C) 2026 LocalBox contributors
 #   Licensed under the GNU Affero General Public License v3 or later.
 #
-"""Запуск игрового движка (engine/server.js) и генерация его config.json.
+"""Запуск игрового сервера LocalBox (server/server.js) и генерация его config.json.
 
-Движок (jackbox-private-server) — серверный процесс LocalBox. Слушает порты 80/443/38202/38203,
-поэтому node должен иметь право на привилегированные порты (setcap) либо запуск от root.
+Сервер слушает порты 80/443/38202/38203, поэтому node должен иметь право на привилегированные
+порты (setcap) либо запуск от root.
 """
 
 from __future__ import annotations
@@ -16,14 +16,17 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
 from . import platform as plat
+from . import settings
 
 
 def engine_dir() -> Path:
-    return plat.repo_root() / "engine"
+    """Каталог нашего сервера LocalBox."""
+    return plat.repo_root() / "server"
 
 
 def client_dir() -> Path:
@@ -59,37 +62,15 @@ def find_node() -> str | None:
 
 
 def write_config(server_url: str, log=print) -> bool:
-    """Создаёт engine/config.json из config.example.json: serverUrl, наш серт, polly off."""
-    d = engine_dir()
-    example = d / "config.example.json"
-    target = d / "config.json"
-    if not example.exists():
-        log(f"Не найден {example} — движок установлен?")
-        return False
-    try:
-        cfg = json.loads(example.read_text(encoding="utf-8"))
-    except Exception as e:  # noqa: BLE001
-        log(f"Ошибка чтения config.example.json: {e}")
-        return False
-
-    cfg["serverUrl"] = server_url
-    cfg.setdefault("polly", {})["enabled"] = False
-    cfg.setdefault("artifacts", {})["uploadEnabled"] = False
-    cfg["ssl"] = {"cert": "../certs/localbox.pem", "key": "../certs/localbox-key.pem"}
-    cfg["internalToken"] = "localbox-internal-token"
-    cfg["allowedOrigins"] = [
-        f"http://{server_url}", f"https://{server_url}",
-        "http://localhost", "https://localhost",
-        "https://jackbox.tv", "https://jackbox.fun",
-    ]
-    # serverUrl внутри конфигов отдельных игр должен совпадать с основным
-    for g in ("quiplash3", "Everyday", "WorldChampions", "JackboxTalks", "BlankyBlank"):
-        ac = cfg.get("appConfigs", {}).get(g)
-        if isinstance(ac, dict) and "serverUrl" in ac:
-            ac["serverUrl"] = server_url
-
-    target.write_text(json.dumps(cfg, indent="\t", ensure_ascii=False), encoding="utf-8")
-    log(f"engine/config.json записан (serverUrl={server_url})")
+    """Создаёт server/config.json (serverUrl + пути к серту)."""
+    cfg = {
+        "serverUrl": server_url,
+        "ssl": {"cert": "../certs/localbox.pem", "key": "../certs/localbox-key.pem"},
+        "games": {"appTags": {}, "appIds": {}, "maxPlayers": {}, "minPlayers": {}},
+        "appConfigs": {},
+    }
+    (engine_dir() / "config.json").write_text(json.dumps(cfg, indent="\t", ensure_ascii=False), encoding="utf-8")
+    log(f"server/config.json записан (serverUrl={server_url})")
     return True
 
 
@@ -149,7 +130,7 @@ def allow_privileged_ports(log=print) -> bool:
 
 
 class EngineProcess:
-    """Запуск engine/server.js с выводом лога в колбэк."""
+    """Запуск server/server.js с выводом лога в колбэк."""
 
     def __init__(self, server_url: str, on_log=print, no_web: bool = False):
         self.on_log = on_log
@@ -168,14 +149,24 @@ class EngineProcess:
         if not node:
             self.on_log("node не найден. Установите Node.js (https://nodejs.org).")
             return False
-        # Прибиваем зависший прошлый движок (порт 38203 переживает краши) — без sudo, best-effort.
-        for cmd in (["pkill", "-9", "-f", "engine/server.js"], ["fuser", "-k", "-9", "38203/tcp"]):
+        # Прибиваем зависший прошлый сервер и освобождаем его порты (переживают краши). best-effort.
+        for cmd in (
+            ["pkill", "-9", "-f", "server/server.js"],
+            ["fuser", "-k", "-9", "38202/tcp"],
+            ["fuser", "-k", "-9", "38203/tcp"],
+        ):
             try:
                 subprocess.run(cmd, capture_output=True, timeout=5)
             except Exception:  # noqa: BLE001
                 pass
         env = os.environ.copy()
         env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
+        # TTS: движок и голос из настроек + python для Silero-воркера (тот же, что у лаунчера).
+        _s = settings.load()
+        env["LOCALBOX_TTS_ENGINE"] = _s.get("tts_engine", "auto")
+        env["LOCALBOX_TTS_VOICE"] = _s.get("tts_voice", "eugene")
+        _tts_py = (_s.get("tts_python") or "").strip()
+        env["LOCALBOX_PYTHON"] = _tts_py or (sys.executable if not getattr(sys, "frozen", False) else (shutil.which("python3") or "python3"))
         if self.no_web:
             env["LOCALBOX_NO_CLIENT"] = "1"
             self.on_log("Режим -no-web: веб-клиент не раздаётся (только игровой сервер).")
@@ -184,11 +175,14 @@ class EngineProcess:
             rc = russian_client_dir()
             env["LOCALBOX_CLIENT_DIR"] = str(rc)
             env["LOCALBOX_CLIENT_FALLBACK"] = str(client_dir())
-            # Докачка фирменных ассетов (задники/логотипы/«ячейки»), которых нет в англ. клиенте,
-            # прямо с исходного сайта; кэшируются на диск (прогреть один раз онлайн — дальше офлайн).
-            origin = "https://jackbox.fun" if rc.name == "client-fun" else "https://jackbox.ru"
-            env.setdefault("LOCALBOX_FETCH_ORIGIN", origin)
-            self.on_log(f"Клиент: русский ({rc.name}) + фоллбэк client/ + докачка недостающего с {origin}")
+            # Докачка фирменных ассетов (задники/логотипы/«ячейки») с исходного сайта — по настройке.
+            # Выключено = полностью локально (движок не ходит на jackbox.ru).
+            if settings.load().get("download_missing", True):
+                origin = "https://jackbox.fun" if rc.name == "client-fun" else "https://jackbox.ru"
+                env["LOCALBOX_FETCH_ORIGIN"] = origin
+                self.on_log(f"Клиент: русский ({rc.name}) + фоллбэк client/ + докачка недостающего с {origin}")
+            else:
+                self.on_log(f"Клиент: русский ({rc.name}) + фоллбэк client/ — полностью локально (без докачки)")
         else:
             env["LOCALBOX_CLIENT_DIR"] = str(client_dir())
         try:
