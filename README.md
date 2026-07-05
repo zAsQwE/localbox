@@ -74,7 +74,7 @@ brew install python-tk          # если нужен GUI
 **1. Получить проект**
 
 ```sh
-git clone <адрес-репозитория> localbox
+git clone https://github.com/zAsQwE/localbox localbox
 # или скачать ZIP и распаковать
 ```
 
