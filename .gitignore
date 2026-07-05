@@ -4,6 +4,7 @@ npm-debug.log*
 
 # Локальные артефакты (генерируются лаунчером — не публикуются)
 config.json
+launcher/localbox-settings.json
 certs/
 *.pem
 *.key
@@ -23,6 +24,11 @@ Thumbs.db
 # Кэш/временное
 cache/
 *.part
+
+# Рантайм-данные сервера и модели TTS (качаются/клонируются сами)
+storage/
+server/tts/*.pt
+server/tts/piper/
 
 # Большие веб-клиенты (ассеты Jackbox) — скачиваются отдельно из источников, см. README.
 # НЕ коммитим: слишком велики и не наши.

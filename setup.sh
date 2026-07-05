@@ -75,5 +75,5 @@ else
 fi
 
 say "Готово"
-echo "Запуск:  cd launcher && ./localbox           # GUI (локально)"
-echo "         cd launcher && ./localbox -ip=АЙПИ  # сервер по сети"
+echo "Запуск:  cd launcher && python3 localbox_launcher.py           # GUI (локально)"
+echo "         cd launcher && python3 localbox_launcher.py -ip=АЙПИ  # сервер по сети"

@@ -1,0 +1,14 @@
+{
+    "serverUrl": "localhost",
+    "ssl": {
+        "cert": "../certs/localbox.pem",
+        "key": "../certs/localbox-key.pem"
+    },
+    "games": {
+        "appTags": {},
+        "appIds": {},
+        "maxPlayers": {},
+        "minPlayers": {}
+    },
+    "appConfigs": {}
+}

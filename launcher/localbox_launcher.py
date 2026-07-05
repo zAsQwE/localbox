@@ -6,7 +6,7 @@
 #
 """GUI-лаунчер LocalBox: один экран — задать адрес сервера, выдать сертификат/права, запустить движок.
 
-Движок (engine/server.js) обслуживает все игры. Запуск:
+Движок (server/server.js) обслуживает все игры. Запуск:
     python3 launcher/localbox_launcher.py        # GUI
     ./localbox                                    # из корня проекта (обёртка)
     python3 launcher/localbox_launcher.py --check # проверка окружения без GUI
@@ -18,7 +18,7 @@ import sys
 import threading
 
 from setup import platform as plat
-from setup import certs, engine
+from setup import certs, engine, settings, tts_preview
 
 
 def run_gui():
@@ -49,6 +49,17 @@ def run_gui():
     st.configure("Accent.TButton", padding=10)
     st.map("Accent.TButton", background=[("!disabled", ACC), ("active", "#7c6cff")],
            foreground=[("!disabled", "#ffffff")])
+    st.configure("Card.TCheckbutton", background=CARD, foreground=FG, indicatorcolor="#2a2440")
+    st.map("Card.TCheckbutton", background=[("active", CARD)], foreground=[("!disabled", FG)],
+           indicatorcolor=[("selected", ACC)])
+    st.configure("TCombobox", fieldbackground="#2a2440", background=CARD, foreground=FG,
+                 arrowcolor=FG, bordercolor="#3a3352", padding=4)
+    st.map("TCombobox", fieldbackground=[("readonly", "#2a2440")], foreground=[("readonly", FG)],
+           selectbackground=[("readonly", "#2a2440")], selectforeground=[("readonly", FG)])
+    root.option_add("*TCombobox*Listbox.background", "#2a2440")
+    root.option_add("*TCombobox*Listbox.foreground", FG)
+    root.option_add("*TCombobox*Listbox.selectBackground", ACC)
+    root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
 
     log_q: "queue.Queue[str]" = queue.Queue()
     log = lambda m: log_q.put(str(m))  # noqa: E731
@@ -89,6 +100,8 @@ def run_gui():
     start_btn.pack(side="left", padx=(12, 0))
     stop_btn = ttk.Button(btns, text="■ Остановить", state="disabled")
     stop_btn.pack(side="left", padx=6)
+    settings_btn = ttk.Button(btns, text="⚙ Настройки")
+    settings_btn.pack(side="left", padx=(12, 0))
 
     # Лог
     log_w = scrolledtext.ScrolledText(outer, height=16, wrap="word", state="disabled",
@@ -98,9 +111,16 @@ def run_gui():
     outer.rowconfigure(4, weight=1)
 
     def drain():
-        while not log_q.empty():
+        if not log_q.empty():
             log_w.configure(state="normal")
-            log_w.insert("end", log_q.get_nowait() + "\n")
+            n = 0
+            while not log_q.empty() and n < 300:  # не больше 300 строк за тик — чтобы GUI не вис
+                log_w.insert("end", log_q.get_nowait() + "\n")
+                n += 1
+            # ограничиваем историю лога (иначе виджет разрастается и всё лагает)
+            total = int(log_w.index("end-1c").split(".")[0])
+            if total > 600:
+                log_w.delete("1.0", f"{total - 600}.0")
             log_w.see("end")
             log_w.configure(state="disabled")
         root.after(150, drain)
@@ -146,10 +166,101 @@ def run_gui():
         start_btn.configure(state="normal"); stop_btn.configure(state="disabled")
         status_var.set("● остановлен"); status_lbl.configure(foreground="#e23b6d")
 
+    def open_settings():
+        win = tk.Toplevel(root)
+        win.title("Настройки LocalBox")
+        win.configure(bg=BG)
+        win.geometry("560x520")
+        win.minsize(520, 480)
+        win.transient(root)
+        cfg = settings.load()
+        dl_var = tk.BooleanVar(value=cfg.get("download_missing", True))
+        tts_var = tk.StringVar(value=cfg.get("tts_engine", "auto"))
+        voice_var = tk.StringVar(value=cfg.get("tts_voice", "eugene"))
+        tts_python_var = tk.StringVar(value=cfg.get("tts_python", ""))
+        WRAP = 496
+
+        outer = ttk.Frame(win, padding=18)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="Настройки", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+
+        # --- сеть / локальный режим ---
+        card = ttk.Frame(outer, style="Card.TFrame", padding=14)
+        card.pack(fill="x")
+        ttk.Checkbutton(card, text="Скачивать недостающие текстуры с jackbox.ru",
+                        variable=dl_var, style="Card.TCheckbutton").pack(anchor="w")
+        ttk.Label(card, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="Выключено = полностью локальный режим (только 127.0.0.1 и локальные файлы): "
+                       "движок не подключается к jackbox.ru даже при наличии интернета."
+                  ).pack(anchor="w", pady=(6, 0))
+
+        # --- озвучка (TTS) ---
+        card2 = ttk.Frame(outer, style="Card.TFrame", padding=14)
+        card2.pack(fill="x", pady=(12, 0))
+        ttk.Label(card2, text="Озвучка (Mad Verse City и др.)", style="Card.TLabel",
+                  font=("", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(card2, text="Движок:", style="Card.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
+        ttk.Combobox(card2, textvariable=tts_var, state="readonly", width=18,
+                     values=settings.TTS_ENGINES).grid(row=1, column=1, columnspan=2, sticky="w", pady=3)
+        ttk.Label(card2, text="Голос:", style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=3)
+        voice_cb = ttk.Combobox(card2, textvariable=voice_var, state="readonly", width=18,
+                                values=settings.voices_for(tts_var.get()))
+        voice_cb.grid(row=2, column=1, sticky="w", pady=3)
+
+        def on_engine_change(*_):
+            vs = settings.voices_for(tts_var.get())
+            voice_cb.configure(values=vs)
+            if voice_var.get() not in vs:
+                voice_var.set(vs[0])
+        tts_var.trace_add("write", on_engine_change)
+
+        listen_btn = ttk.Button(card2, text="▶ Прослушать")
+        listen_btn.grid(row=2, column=2, sticky="w", padx=(10, 0), pady=3)
+
+        def on_listen():
+            listen_btn.configure(state="disabled")
+            eng, voi = tts_var.get(), voice_var.get()
+
+            def w():
+                try:
+                    tts_preview.preview(eng, voi, log=log)
+                finally:
+                    root.after(0, lambda: listen_btn.configure(state="normal"))
+            threading.Thread(target=w, daemon=True).start()
+        listen_btn.configure(command=on_listen)
+
+        ttk.Label(card2, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="silero — нейроголос (офлайн; pip install torch numpy). "
+                       "piper — нейроголос, легче/быстрее (pip install piper-tts). "
+                       "espeak — робо-голос. silent — без голоса. auto — silero → piper → espeak."
+                  ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Label(card2, text="Python для TTS:", style="Card.TLabel").grid(row=4, column=0, sticky="w", padx=(0, 10), pady=(8, 2))
+        ttk.Entry(card2, textvariable=tts_python_var).grid(row=4, column=1, columnspan=3, sticky="ew", pady=(8, 2))
+        ttk.Label(card2, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="Пусто = python лаунчера. Укажи путь к python из venv (напр. 3.11/3.12), если "
+                       "основной python слишком новый и ML-библиотеки (torch/coqui) не ставятся."
+                  ).grid(row=5, column=0, columnspan=4, sticky="w")
+
+        def save_close():
+            cfg["download_missing"] = dl_var.get()
+            cfg["tts_engine"] = tts_var.get()
+            cfg["tts_voice"] = voice_var.get()
+            cfg["tts_python"] = tts_python_var.get().strip()
+            settings.save(cfg)
+            log(f"Настройки сохранены (озвучка: {tts_var.get()} / {voice_var.get()}). "
+                "Применятся при следующем запуске сервера.")
+            win.destroy()
+
+        bar = ttk.Frame(outer)
+        bar.pack(fill="x", side="bottom", pady=(16, 0))
+        ttk.Button(bar, text="Сохранить", style="Accent.TButton", command=save_close).pack(side="right")
+        ttk.Button(bar, text="Отмена", command=win.destroy).pack(side="right", padx=8)
+
     cert_btn.configure(command=on_cert)
     ports_btn.configure(command=on_ports)
     start_btn.configure(command=on_start)
     stop_btn.configure(command=on_stop)
+    settings_btn.configure(command=open_settings)
 
     def on_close():
         on_stop(); root.destroy()
@@ -174,7 +285,7 @@ def check_environment():
 
 
 def parse_cli(argv):
-    o = {"check": False, "server": False, "no_web": False, "ip": None}
+    o = {"check": False, "server": False, "no_web": False, "ip": None, "local": None, "tts": None, "voice": None}
     for a in argv:
         if a == "--check":
             o["check"] = True
@@ -183,17 +294,39 @@ def parse_cli(argv):
         elif a in ("-no-web", "--no-web"):
             o["no_web"] = True
             o["server"] = True
+        elif a in ("-local", "--local", "-offline", "--offline"):
+            o["local"] = True  # полностью локально: не докачивать с jackbox.ru
+            o["server"] = True
+        elif a in ("-online", "--online"):
+            o["local"] = False
+        elif a.startswith("-tts=") or a.startswith("--tts="):
+            o["tts"] = a.split("=", 1)[1]
+            o["server"] = True
+        elif a.startswith("-voice=") or a.startswith("--voice="):
+            o["voice"] = a.split("=", 1)[1]
+            o["server"] = True
         elif a.startswith("-ip=") or a.startswith("--ip="):
             o["ip"] = a.split("=", 1)[1]
             o["server"] = True
     return o
 
 
-def run_server_cli(ip, no_web):
+def run_server_cli(ip, no_web, local=None, tts=None, voice=None):
     """Серверный режим без GUI: серт + права на порты + запуск движка, лог в терминал."""
     import time
     ip = ip or plat.local_ip()
-    print(f"== LocalBox (сервер) == адрес: {ip} | веб-клиент: {'выкл' if no_web else 'вкл'}")
+    if local is not None or tts is not None or voice is not None:
+        cfg = settings.load()
+        if local is not None:
+            cfg["download_missing"] = not local
+        if tts is not None:
+            cfg["tts_engine"] = tts
+        if voice is not None:
+            cfg["tts_voice"] = voice
+        settings.save(cfg)
+    fully_local = not settings.load().get("download_missing", True)
+    print(f"== LocalBox (сервер) == адрес: {ip} | веб-клиент: {'выкл' if no_web else 'вкл'}"
+          f" | режим: {'полностью локально' if fully_local else 'докачка вкл'}")
 
     if not engine.engine_dir().exists():
         print("Движок не найден (engine/). Скачайте исходники целиком."); sys.exit(1)
@@ -236,14 +369,14 @@ def main():
         return
     # Серверный/headless режим: явный флаг или нет графической сессии.
     if o["server"] or _no_display():
-        run_server_cli(o["ip"], o["no_web"])
+        run_server_cli(o["ip"], o["no_web"], o["local"], o["tts"], o["voice"])
         return
     try:
         run_gui()
     except Exception as e:  # noqa: BLE001
         print(f"Не удалось открыть GUI ({e}). Перехожу в серверный режим.")
         print("Подсказка: GUI требует tkinter (Arch: sudo pacman -S tk) и дисплей.")
-        run_server_cli(o["ip"], o["no_web"])
+        run_server_cli(o["ip"], o["no_web"], o["local"], o["tts"], o["voice"])
 
 
 if __name__ == "__main__":
