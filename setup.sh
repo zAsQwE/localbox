@@ -31,8 +31,8 @@ fi
 ok "node $(node -v), npm $(npm -v 2>/dev/null)"
 
 # 2) Зависимости движка
-say "Зависимости движка (engine/node_modules)"
-if [ -d engine/node_modules/express ]; then
+say "Зависимости движка (server/node_modules)"
+if [ -d server/node_modules/express ]; then
     ok "уже установлены"
 else
     echo "  npm i ..."
