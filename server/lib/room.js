@@ -46,6 +46,7 @@ class Room {
         this.banned = [];
         this.createdAt = Date.now();
         this.audienceClients = {}; // clientId -> ws client
+        this._audiencePush = {};   // key -> таймер троттлинга рассылки зрителям
         this.blobcast = false;     // true, если хост — старая игра (Blobcast): игрокам нужен bc:customer
     }
 
@@ -94,15 +95,23 @@ class Room {
         return true;
     }
     sendToHost(msg, re) { if (this.host && this.host.profileId != null) this.sendTo(this.host.profileId, msg, re); }
+    // Разослать всем зрителям (они всегда ecast, без профиля — шлём напрямую).
+    sendToAudience(msg) {
+        Object.values(this.audienceClients).forEach((c) => {
+            if (c && c.readyState === 1) { try { c.sendEcast(msg); } catch { /* закрыт */ } }
+        });
+    }
     sendToAll(msg) {
         this.sendToHost(msg);
         Object.keys(this.players).forEach((pid) => this.sendTo(Number(pid), msg));
+        this.sendToAudience(msg);
     }
     sendByAcl(acl, msg, sendToHost = true) {
         if (sendToHost) this.sendToHost(msg);
         Object.values(this.players).forEach((p) => {
             if (u.aclVisible(acl, p.role, p.profileId)) this.sendTo(p.profileId, msg);
         });
+        if (this.audienceCount > 0 && u.aclVisible(acl, "audience", null)) this.sendToAudience(msg);
     }
 
     // ---- сущности ----
@@ -119,6 +128,20 @@ class Room {
             if (p.profileId === exceptProfileId) return;
             if (u.aclVisible(e.acl, p.role, p.profileId) && u.aclReadable(e.acl, p.role, p.profileId)) this.sendTo(p.profileId, msg);
         });
+        // Зрителей уведомляем троттлингом: 100 зрителей × частые правки = шторм, коалесцируем по ключу.
+        if (this.audienceCount > 0 && u.aclVisible(e.acl, "audience", null) && u.aclReadable(e.acl, "audience", null))
+            this._notifyAudience(key);
+    }
+    // Коалесцирующая рассылка сущности зрителям (не чаще ~7 раз/сек на ключ).
+    _notifyAudience(key) {
+        if (this._audiencePush[key]) return;
+        this._audiencePush[key] = setTimeout(() => {
+            delete this._audiencePush[key];
+            const e = this.entities[key];
+            if (!e || this.audienceCount === 0) return;
+            if (u.aclVisible(e.acl, "audience", null) && u.aclReadable(e.acl, "audience", null))
+                this.sendToAudience({ opcode: e.type, result: this.getBody(key) });
+        }, 150);
     }
 
     createEntity(type, key, aclRaw, content) {
@@ -271,8 +294,12 @@ class Room {
     disconnect(client) {
         if (this.host && this.host.client === client) {
             this.host.connected = false; this.host.client = null;
-            // Хост ушёл (вышел из игры) → комната закрывается, игроков выкидываем.
+            // Хост ушёл (вышел из игры) → комната закрывается, игроков и зрителей выкидываем.
             Object.values(this.players).forEach((p) => this.sendTo(p.profileId, { opcode: "room/exit", result: { cause: 5 } }));
+            this.sendToAudience({ opcode: "room/exit", result: { cause: 5 } });
+            Object.values(this.audienceClients).forEach((c) => { try { c.close(1000); } catch { /* ignore */ } });
+            Object.values(this._audiencePush).forEach((t) => clearTimeout(t));
+            this._audiencePush = {};
             delete rooms[this.code];
             console.log("[room] закрыта (хост вышел):", this.code);
             return;

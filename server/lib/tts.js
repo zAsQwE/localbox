@@ -136,7 +136,9 @@ async function toAudio(id) {
 }
 
 function espeakVoice(voice) {
-    const v = String(voice || "");
+    const v = String(voice || "").trim();
+    // прямое имя голоса espeak (напр. "ru", "ru+m5", "ru+f3") — используем как есть
+    if (/^[a-z]{2,3}(\+[mf]\d{1,2})?$/i.test(v)) return v;
     if (/fem|жен|kseniya|xenia|baya/i.test(v)) return "ru+f3";
     if (/max|male|муж|aidar|eugene/i.test(v)) return "ru+m3";
     return "ru";
