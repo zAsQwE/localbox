@@ -6,6 +6,8 @@
 
 Собственный игровой сервер (Ecast + Blobcast) на Node.js. Веб-интерфейс основан на **jackbox.tv** (английский) и **jackbox.ru** (русский).
 
+tg = https://t.me/lacalbox
+
 ---
 
 ## Требования по системам
@@ -72,7 +74,7 @@ brew install python-tk          # если нужен GUI
 **1. Получить проект**
 
 ```sh
-git clone <адрес-репозитория> localbox
+git clone https://github.com/zAsQwE/localbox localbox
 # или скачать ZIP и распаковать
 ```
 
