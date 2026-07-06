@@ -137,9 +137,11 @@ function dispatch(client, msg) {
             client.sendEcast({ opcode: "room/get-audience", result: { connections: room.audienceCount } }, msg.seq);
             return;
         case "room/start-audience":
+            // Включаем режим зрителей. Сущности для зрителей игра создаёт сама обычными
+            // опкодами (object/number/... с ACL role:audience) — они автоматически
+            // раздаются зрителям через notify/welcome.
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             room.audienceEnabled = true;
-            if (!room.entities["audience"]) room.createEntity("audience/pn-counter", "audience", ["r *"], { count: room.audienceCount || 0 });
             break;
         case "client/send": {
             if (p.to == null) return client.sendError(msg.seq, 2004);
