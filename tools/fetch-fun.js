@@ -26,7 +26,9 @@ const REPO = path.resolve(__dirname, "..");
 
 function parseArgs(argv) {
     const a = { host: "jackbox.fun", src: "client", dst: "client-fun", concurrency: 8,
-                only: null, doh: "https://1.1.1.1/dns-query" };
+                only: null, doh: "https://1.1.1.1/dns-query",
+                // режим диапазона:
+                url: null, from: null, to: null, ext: ".ogg", pad: 0, dry: false, noDoh: false };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i];
         if (k === "--host") a.host = argv[++i];
@@ -35,6 +37,13 @@ function parseArgs(argv) {
         else if (k === "--concurrency") a.concurrency = Number(argv[++i]) || a.concurrency;
         else if (k === "--only") a.only = argv[++i];
         else if (k === "--doh") a.doh = argv[++i];
+        else if (k === "--url") a.url = argv[++i];
+        else if (k === "--from") a.from = parseInt(argv[++i], 10);
+        else if (k === "--to") a.to = parseInt(argv[++i], 10);
+        else if (k === "--ext") a.ext = argv[++i];
+        else if (k === "--pad") a.pad = Number(argv[++i]) || 0;
+        else if (k === "--dry") a.dry = true;
+        else if (k === "--no-doh") a.noDoh = true;
     }
     return a;
 }
@@ -74,7 +83,7 @@ function walk(dir, base = dir, out = []) {
 function download(host, ip, rel, dstFile) {
     return new Promise((resolve) => {
         const opts = {
-            host: ip, servername: host, port: 443,
+            host: ip || host, servername: host, port: 443,
             path: "/" + rel.split(path.sep).join("/"),
             method: "GET", headers: { host, "user-agent": "LocalBox-fetch-fun" },
         };
@@ -93,8 +102,77 @@ function download(host, ip, rel, dstFile) {
     });
 }
 
+// Режим диапазона: качает NNNNNN.ogg от --from до --to (включительно) с --url.
+//   node tools/fetch-fun.js --url https://jackbox.ru/mods/pp2/earwax/sounds/ --from 111111 --to 112041
+// Сохраняет по умолчанию в client-ru/<путь-из-URL>/, чтобы локальный сервер сразу их отдавал.
+async function runRange(args) {
+    const u = new URL(args.url);
+    const host = u.hostname;
+    const basePath = u.pathname.endsWith("/") ? u.pathname : u.pathname + "/"; // "/mods/pp2/earwax/sounds/"
+    const dstBase = args.dst && args.dst !== "client-fun"
+        ? path.resolve(REPO, args.dst)
+        : path.join(REPO, "client-ru", basePath.replace(/^\//, ""));
+
+    if (args.from == null || args.to == null || Number.isNaN(args.from) || Number.isNaN(args.to)) {
+        console.error("Нужны --from и --to (числа)."); process.exit(1);
+    }
+    if (args.to < args.from) { console.error("--to меньше --from."); process.exit(1); }
+
+    const name = (n) => (args.pad > 0 ? String(n).padStart(args.pad, "0") : String(n)) + args.ext;
+    const total = args.to - args.from + 1;
+
+    console.log(`Качаю диапазон: https://${host}${basePath}{${name(args.from)} … ${name(args.to)}}`);
+    console.log(`Всего номеров:  ${total}`);
+    console.log(`Сохраняю в:     ${dstBase}`);
+
+    if (args.dry) {
+        const sample = [];
+        for (let n = args.from; n <= args.to && sample.length < 3; n++) sample.push(name(n));
+        console.log(`\n[dry] Примеры первых: ${sample.join(", ")}`);
+        console.log(`[dry] Последний:      ${name(args.to)}`);
+        console.log(`[dry] Пример URL:     https://${host}${basePath}${name(args.from)}`);
+        console.log(`[dry] Пример файла:   ${path.join(dstBase, name(args.from))}`);
+        console.log(`\n[dry] Реального скачивания нет. Убери --dry, чтобы скачать ${total} файлов.`);
+        return;
+    }
+
+    let ip = null;
+    if (!args.noDoh) {
+        try { ip = await resolveIp(host, args.doh); console.log(`Реальный IP ${host}: ${ip}`); }
+        catch (e) { console.log(`DoH не смог (${e.message}) — подключаюсь напрямую по имени.`); }
+    }
+    console.log("");
+
+    // список номеров, пропуская уже скачанные
+    const todo = [];
+    for (let n = args.from; n <= args.to; n++) {
+        if (!fs.existsSync(path.join(dstBase, name(n)))) todo.push(n);
+    }
+    console.log(`К скачке: ${todo.length}, уже есть: ${total - todo.length}\n`);
+
+    let done = 0, ok = 0, missing = 0, failed = 0, idx = 0;
+    async function worker() {
+        while (idx < todo.length) {
+            const n = todo[idx++];
+            const fname = name(n);
+            const rel = basePath.replace(/^\//, "") + fname;
+            const r = await download(host, ip, rel, path.join(dstBase, fname));
+            done++;
+            if (r.ok) ok++;
+            else if (r.status === 404) missing++;
+            else { failed++; if (failed <= 40) console.log(`  [${r.status || r.error}] ${fname}`); }
+            if (done % 100 === 0) console.log(`  …${done}/${todo.length} (ok ${ok}, нет ${missing}, ошибок ${failed})`);
+        }
+    }
+    await Promise.all(Array.from({ length: args.concurrency }, worker));
+
+    console.log(`\nГотово. Скачано: ${ok}, отсутствуют(404): ${missing}, ошибок: ${failed}.`);
+    console.log(`Файлы в ${dstBase}. Сервер отдаст их по пути ${basePath}.`);
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
+    if (args.url) return runRange(args);
     const srcDir = path.resolve(REPO, args.src);
     const dstDir = path.resolve(REPO, args.dst);
     if (!fs.existsSync(srcDir)) {

@@ -28,10 +28,12 @@ router.get("/crossdomain.xml", (req, res) => {
 });
 
 // socket.io 0.9 handshake: <sessionId>:<heartbeat>:<closeTimeout>:<transports>
-router.get("/socket.io/1", (req, res) => {
+// Отвечаем на ЛЮБОЙ метод и со слэшем/без: Steam-хост шлёт GET, а Android/AIR-версия
+// (напр. Word Spud «Слово Блуд») — POST /socket.io/1/ . Иначе хост не открывает сокет.
+router.all(["/socket.io/1", "/socket.io/1/"], (req, res) => {
     const token = u.makeToken();
     res.type("text/plain").set("Set-Cookie", "socket.io.sid=" + token + "; Max-Age=3600");
-    res.send(token + ":60:60:websocket,flashsocket");
+    res.send(token + ":60:60:websocket");
 });
 
 router.get("/room", (req, res) => res.send({ create: true, server: state.serverUrl }));

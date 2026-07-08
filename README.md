@@ -229,4 +229,34 @@ sudo pkill -9 -f server/server.js; sudo fuser -k -9 38203/tcp
 
 ---
 
+## Android: сервер в Termux + VPN-приложение (папка `android/`, необязательно)
+
+Папка `android/` — **необязательная и самодостаточная**: её можно удалить, на основной проект это не влияет. Внутри две вещи для игры **на Android без ПК**:
+
+- **`android/server/`** — тот же игровой сервер, но переписанный на **Go** (один статический бинарь, без Node). Запускается в **Termux** на телефоне/планшете.
+- **`android/vpn/`** — приложение-VPN: локально **подменяет домены Jackbox на IP твоего сервера** (перехват DNS). Так немодифицированная игра идёт на твой сервер. Готовый **`.apk` — в разделе [Releases](../../releases)**.
+
+### Как играть
+1. Собери Go-сервер под ARM64 и закинь в Termux:
+   ```sh
+   cd android/server
+   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o localbox-arm64 .
+   # в Termux:
+   LOCALBOX_PORT=9999 LOCALBOX_SERVER_URL=<ip>:9999 ./localbox-arm64
+   ```
+2. Поставь **VPN-приложение** (APK из Releases или собери сам, см. ниже) → впиши `<ip>` → «Включить».
+3. Запусти игру Jackbox — она пойдёт на твой сервер. Игроки с телефонов — в браузере на `http://<ip>:9999`.
+
+### Собрать APK самому
+Открой папку `android/vpn` в **Android Studio** → *Build → Build APK(s)*. Готовый файл: `android/vpn/app/build/outputs/apk/…`.
+
+### Честные ограничения
+- VPN меняет только **домен → IP**, не порт и не TLS. Работает для игр по **http** (старые Flash-паки).
+- Termux без root не займёт порты 80/443 — держи сервер на высоком порту (9999).
+- Игры по https/wss с проверкой сертификата на домен Jackbox так не завернуть (нужен свой CA в системе).
+
+Go-сервер поддерживает Ecast + Blobcast + раздачу клиента; **не** поддерживает TTS и text-map (CRDT). Переменные окружения: `LOCALBOX_PORT`, `LOCALBOX_SERVER_URL`, `LOCALBOX_CLIENT_DIR`, `LOCALBOX_GAMES`, `LOCALBOX_DEBUG=1`.
+
+---
+
 Я **не** связан с Jackbox Games. Все права на оригинальные сервисы, название и бренд Jackbox принадлежат Jackbox Games. Перевод — сообщества (jackbox.ru / What If?).

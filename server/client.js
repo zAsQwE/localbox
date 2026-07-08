@@ -78,13 +78,19 @@ function resolveFile(urlPath) {
     return resolveInDir(CLIENT_DIR, urlPath) || resolveInDir(FALLBACK_DIR, urlPath);
 }
 
-function rewrite(text, host) {
+function rewrite(text, host, secure) {
     // host = тот же адрес, с которого открыта страница, чтобы API-запросы были same-origin
     // (иначе браузер режет их по CORS). Fallback — serverUrl движка.
     const target = host || (global.jbg && global.jbg.serverUrl) || "localhost";
     let out = text;
     for (const h of REWRITE_HOSTS) out = out.split(h).join(target);
     out = out.replace(/\sintegrity=("|')[^"']*\1/gi, "");
+    if (!secure) {
+        // Страница открыта по http → понижаем API/ws на нашем хосте до http/ws. Иначе браузер
+        // режет http→https по CORS, а самоподписанный серт не доверен (игрок «не может зайти»).
+        out = out.split("https://" + target).join("http://" + target)
+                 .split("wss://" + target).join("ws://" + target);
+    }
     return out;
 }
 
@@ -94,7 +100,8 @@ function sendBuffer(buf, ext, req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     if (TEXT_EXT.has(ext)) {
         const reqHost = (req.headers.host || "").split(":")[0] || null;
-        res.end(rewrite(buf.toString("utf8"), reqHost));
+        const secure = !!(req.socket && req.socket.encrypted); // страница отдана по https?
+        res.end(rewrite(buf.toString("utf8"), reqHost, secure));
     } else {
         res.end(buf);
     }
