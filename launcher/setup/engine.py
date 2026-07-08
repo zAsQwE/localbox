@@ -85,7 +85,7 @@ def install_deps(log=print) -> bool:
         return False
     log("Устанавливаю зависимости движка (npm i)… это может занять минуту")
     try:
-        p = subprocess.run([npm, "install"], cwd=str(engine_dir()), capture_output=True, text=True,
+        p = subprocess.run([npm, "install"], cwd=str(engine_dir()), capture_output=True, text=True, encoding="utf-8", errors="replace",
                            shell=plat.is_windows())
         if p.returncode != 0:
             log(p.stdout[-500:]); log(p.stderr[-500:])
@@ -118,7 +118,7 @@ def allow_privileged_ports(log=print) -> bool:
         log("Нужен pkexec или sudo. Вручную: sudo setcap cap_net_bind_service=+ep " + real)
         return False
     try:
-        p = subprocess.run(runner + cmd, capture_output=True, text=True)
+        p = subprocess.run(runner + cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if p.returncode == 0:
             log(f"Порты 80/443 разрешены для node ({real}).")
             return True
@@ -189,6 +189,7 @@ class EngineProcess:
             self.proc = subprocess.Popen(
                 [node, "server.js"], cwd=str(engine_dir()), env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                encoding="utf-8", errors="replace",
             )
         except Exception as e:  # noqa: BLE001
             self.on_log(f"Не удалось запустить движок: {e}")

@@ -102,7 +102,7 @@ def ensure_local_cert(local_ip: str, log=print, force: bool = True) -> bool:
 
 def _mkcert_caroot():
     try:
-        r = subprocess.run(["mkcert", "-CAROOT"], capture_output=True, text=True, check=True)
+        r = subprocess.run(["mkcert", "-CAROOT"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
         return r.stdout.strip()
     except Exception:  # noqa: BLE001
         return None
@@ -115,13 +115,13 @@ def _generate_mkcert(names, cert: Path, key: Path, log) -> bool:
     # update-ca-certificates (Debian) вместо update-ca-trust и прерывается ДО установки в
     # браузерное хранилище (NSS) — поэтому браузер выдаёт ERR_CERT_AUTHORITY_INVALID.
     # Сам CA создаётся, leaf-сертификат генерируется. Доверие в браузер/систему добавим сами.
-    subprocess.run(["mkcert", "-install"], capture_output=True, text=True)
+    subprocess.run(["mkcert", "-install"], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     try:
         # mkcert принимает и доменные имена, и IP как обычные аргументы.
         subprocess.run(
             ["mkcert", "-cert-file", str(cert), "-key-file", str(key), *names],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         log(f"Готово: {cert}")
         trust_ca(log=log)
@@ -163,10 +163,10 @@ def _trust_ca_nss_linux(rootca: Path, log) -> None:
     nssdb.mkdir(parents=True, exist_ok=True)
     # Удаляем старую запись с тем же ником (идемпотентность), затем добавляем.
     subprocess.run(["certutil", "-D", "-d", f"sql:{nssdb}", "-n", "mkcert-localbox"],
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, encoding="utf-8", errors="replace")
     res = subprocess.run(
         ["certutil", "-A", "-d", f"sql:{nssdb}", "-t", "C,,", "-n", "mkcert-localbox", "-i", str(rootca)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if res.returncode == 0:
         log("CA добавлен в доверие браузера (NSS ~/.pki/nssdb). ПЕРЕЗАПУСТИТЕ Chrome/Chromium полностью.")
@@ -188,7 +188,7 @@ def _generate_openssl(names, cert: Path, key: Path, log) -> bool:
                 "-days", "825", "-subj", f"/CN={cn}",
                 "-addext", f"subjectAltName={san}",
             ],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         log(f"Готово: {cert}")
         log("ВНИМАНИЕ: сертификат самоподписанный. Чтобы игры/телефоны ему доверяли,")
