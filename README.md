@@ -237,15 +237,19 @@ sudo pkill -9 -f server/server.js; sudo fuser -k -9 38203/tcp
 - **`android/vpn/`** — приложение-VPN: локально **подменяет домены Jackbox на IP твоего сервера** (перехват DNS). Так немодифицированная игра идёт на твой сервер. Готовый **`.apk` — в разделе [Releases](../../releases)**.
 
 ### Как играть
-1. Собери Go-сервер под ARM64 и закинь в Termux:
+1. Собери Go-сервер **нативно в Termux** (там `pkg install golang git`, при ошибке про C — `pkg install clang`):
    ```sh
-   cd android/server
-   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o localbox-arm64 .
-   # в Termux:
-   LOCALBOX_PORT=9999 LOCALBOX_SERVER_URL=<ip>:9999 ./localbox-arm64
+   cd ~/localbox/android/server
+   go build -o localbox-arm64 .        # БЕЗ GOOS/GOARCH — иначе получится не-PIE бинарь,
+                                        # и Termux откажет: "unexpected e_type: 2"
+   # запуск (подставь реальный IP телефона, узнать: ip addr):
+   LOCALBOX_PORT=9999 LOCALBOX_SERVER_URL=192.168.1.213:9999 ./localbox-arm64
    ```
-2. Поставь **VPN-приложение** (APK из Releases или собери сам, см. ниже) → впиши `<ip>` → «Включить».
-3. Запусти игру Jackbox — она пойдёт на твой сервер. Игроки с телефонов — в браузере на `http://<ip>:9999`.
+   > Android/Termux запускает только PIE-бинари. Кросс-компиляция `GOOS=linux GOARCH=arm64` даёт
+   > статический ELF типа EXEC, который Termux не запустит. Собирай **в самом Termux** (там Go
+   > целится в Android и делает PIE), либо кросс-компилируй с `GOOS=android` + Android NDK.
+2. Поставь **VPN-приложение** (APK из Releases или собери сам, см. ниже) → впиши IP → «Включить».
+3. Запусти игру Jackbox — она пойдёт на твой сервер. Игроки с телефонов — в браузере на `http://IP:9999`.
 
 ### Собрать APK самому
 Открой папку `android/vpn` в **Android Studio** → *Build → Build APK(s)*. Готовый файл: `android/vpn/app/build/outputs/apk/…`.
