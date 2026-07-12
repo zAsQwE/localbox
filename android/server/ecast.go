@@ -333,8 +333,10 @@ func dispatch(c *Client, msg map[string]interface{}) {
 				return // ошибка уже отправлена
 			}
 		} else {
-			logf("[ws] НЕИЗВЕСТНЫЙ опкод от %s: %s", roleOr(c.role), op)
-			c.sendError(room, seq, 2003, "")
+			// Неизвестный опкод (external-request/create, audience/count-group/*) — отвечаем ok,
+			// как johnbox. Ошибка 2003 заставляла игру считать запрос отклонённым.
+			logf("[ws] неизвестный опкод от %s: %s → ok", roleOr(c.role), op)
+			c.sendOk(room, seq)
 			return
 		}
 	}

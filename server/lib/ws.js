@@ -220,8 +220,11 @@ function dispatch(client, msg) {
                 ok = handleEntity(client, room, msg, type, action);
                 if (ok === undefined) return; // ошибка уже отправлена
             } else {
-                console.log("[ws] НЕИЗВЕСТНЫЙ опкод от " + (client.role || "?") + ": " + op);
-                return client.sendError(msg.seq, 2003);
+                // Неизвестный опкод (напр. external-request/create, audience/count-group/*) —
+                // отвечаем ok, как johnbox. Ошибка (2003) заставляла игру считать запрос
+                // отклонённым (Додо Ре Ми: «обработка выступления отклонена»).
+                console.log("[ws] неизвестный опкод от " + (client.role || "?") + ": " + op + " → ok");
+                return client.sendOk(msg.seq);
             }
     }
     if (ok && !NO_OK.has(op)) client.sendOk(msg.seq);
