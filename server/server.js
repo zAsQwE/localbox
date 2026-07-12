@@ -120,7 +120,7 @@ const wss = new WebSocketServer({ noServer: true });
 
 function onUpgrade(request, socket, head) {
     const [reqPath, qs] = request.url.split("?");
-    console.log("[ws] апгрейд:", reqPath);
+    console.log("[ws] апгрейд:", reqPath, qs ? "?" + qs : "");
     // Blobcast: socket.io 0.9 — /socket.io/1/websocket/<token>
     if (/^\/socket\.io\/1\/websocket\/[0-9a-f]+$/.test(reqPath)) {
         wss.handleUpgrade(request, socket, head, (client) => handleBlobcast(client));
