@@ -69,7 +69,10 @@ function attach(client, roomCode) {
 module.exports = function handleConnection(client, code, query) {
     attach(client, code);
     const room = mgr.get(code);
-    if (!room) { client.sendError(undefined, 2013); return; }
+    if (!room) {
+        console.log("[ws] НЕТ КОМНАТЫ " + code + " (role=" + (query.role || "?") + ", user-id=" + (query["user-id"] || "?") + ", host-token=" + (query["host-token"] ? "есть" : "нет") + ") — соединение отклонено");
+        client.sendError(undefined, 2013); return;
+    }
 
     const role = query.role;
     if (["host", "player", "moderator", "audience"].indexOf(role) === -1) { client.sendError(undefined, 2014); return; }

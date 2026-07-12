@@ -400,10 +400,21 @@ func (r *Room) createEntity(typ, key string, aclRaw []string, content map[string
 }
 func (r *Room) setEntity(typ, key string, aclRaw []string, content map[string]interface{}) {
 	version := 1
-	if prev := r.entities[key]; prev != nil {
+	prev := r.entities[key]
+	if prev != nil {
 		version = prev.Version + 1
 	}
-	e := &Entity{Type: typ, ACL: aclOrDefault(aclRaw, "r *"), Version: version, Extra: map[string]interface{}{}}
+	// ACL: если явно не задан при set — СОХРАНЯЕМ прежний (иначе сброс на "r *" делает
+	// приватные сущности (audiencePlayer) видимыми игрокам → игра считает игрока зрителем).
+	var acl []Rule
+	if len(aclRaw) > 0 {
+		acl = parseAcl(aclRaw)
+	} else if prev != nil {
+		acl = prev.ACL
+	} else {
+		acl = parseAcl([]string{"r *"})
+	}
+	e := &Entity{Type: typ, ACL: acl, Version: version, Extra: map[string]interface{}{}}
 	r.applyContent(e, content)
 	r.entities[key] = e
 }

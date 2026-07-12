@@ -154,8 +154,12 @@ class Room {
     setEntity(type, key, aclRaw, content) {
         const prev = this.entities[key];
         const version = prev ? prev.version + 1 : 1;
+        // ACL: если явно не задан при set — СОХРАНЯЕМ прежний (иначе сброс на "r *" делает
+        // приватные сущности вроде audiencePlayer видимыми игрокам → игра считает игрока зрителем).
+        const acl = (aclRaw && aclRaw.length) ? u.parseAcl(aclRaw)
+            : (prev ? prev.acl : u.parseAcl(["r *"]));
         this.entities[key] = Object.assign(
-            { type, acl: u.parseAcl(aclRaw && aclRaw.length ? aclRaw : ["r *"]), version, from: null },
+            { type, acl, version, from: null },
             content
         );
         return true;
