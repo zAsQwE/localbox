@@ -6,7 +6,7 @@
 
 Собственный игровой сервер (Ecast + Blobcast) на Node.js. Веб-интерфейс основан на **jackbox.tv** (английский) и **jackbox.ru** (русский).
 
-tg = https://t.me/lacalbox
+tg = https://t.me/lacalbox (alt = https://telegram.me/lacalbox)
 
 ---
 
