@@ -248,18 +248,42 @@ sudo pkill -9 -f server/server.js; sudo fuser -k -9 38203/tcp
    > Android/Termux запускает только PIE-бинари. Кросс-компиляция `GOOS=linux GOARCH=arm64` даёт
    > статический ELF типа EXEC, который Termux не запустит. Собирай **в самом Termux** (там Go
    > целится в Android и делает PIE), либо кросс-компилируй с `GOOS=android` + Android NDK.
-2. Поставь **VPN-приложение** (APK из Releases или собери сам, см. ниже) → впиши IP → «Включить».
+2. Поставь **VPN-приложение** (APK из Releases или собери сам, см. ниже) → впиши IP → «Включить»
+   (IP запоминается — при следующем запуске подставится).
 3. Запусти игру Jackbox — она пойдёт на твой сервер. Игроки с телефонов — в браузере на `http://IP:9999`.
+
+> Сервер **не падает**, если порт занять не удалось (напр. 80/443 без root) — просто пропускает его
+> и работает на доступных. Так что на Android без root бери высокий порт (9999) и всё стартует.
+
+### Хост-игра на своём порту (без root, вместо 443)
+Игра берёт адрес из `serverUrl`, и **порт можно указать прямо в нём** — тогда 443/root не нужны:
+```sh
+# сервер на 8888 (по http — проще всего, без сертификата):
+LOCALBOX_PORT=8888 LOCALBOX_SERVER_URL=192.168.1.213:8888 ./localbox-arm64
+```
+В Steam — параметр запуска: `-jbg.config serverUrl=http://192.168.1.213:8888`.
+Если игра требует **https** — подними TLS на том же порту:
+```sh
+LOCALBOX_PORT=8888 LOCALBOX_TLS=1 LOCALBOX_CERT=/путь/cert.pem LOCALBOX_KEY=/путь/key.pem \
+  LOCALBOX_SERVER_URL=192.168.1.213:8888 ./localbox-arm64
+```
+и `-jbg.config serverUrl=192.168.1.213:8888` (серт должен быть доверенным на машине с игрой).
+
+> Это работает, когда можно **задать игре serverUrl** (Steam-параметр / патч конфига). Через
+> **VPN-подмену DNS порт не сменить** — DNS меняет только домен→IP, а порт остаётся у игры (443);
+> для смены порта нужен прозрачный прокси или root на 443.
 
 ### Собрать APK самому
 Открой папку `android/vpn` в **Android Studio** → *Build → Build APK(s)*. Готовый файл: `android/vpn/app/build/outputs/apk/…`.
 
 ### Честные ограничения
 - VPN меняет только **домен → IP**, не порт и не TLS. Работает для игр по **http** (старые Flash-паки).
-- Termux без root не займёт порты 80/443 — держи сервер на высоком порту (9999).
-- Игры по https/wss с проверкой сертификата на домен Jackbox так не завернуть (нужен свой CA в системе).
+- Termux без root не займёт порты 80/443 — держи сервер на высоком порту (9999/8888).
+- Игры по https/wss с проверкой сертификата на домен Jackbox через VPN не завернуть (нужен свой CA в системе).
 
-Go-сервер поддерживает Ecast + Blobcast + раздачу клиента; **не** поддерживает TTS и text-map (CRDT). Переменные окружения: `LOCALBOX_PORT`, `LOCALBOX_SERVER_URL`, `LOCALBOX_CLIENT_DIR`, `LOCALBOX_GAMES`, `LOCALBOX_DEBUG=1`.
+Go-сервер поддерживает Ecast + Blobcast + раздачу клиента; **не** поддерживает TTS и text-map (CRDT).
+Переменные окружения: `LOCALBOX_PORT`, `LOCALBOX_TLS` (=1 → https), `LOCALBOX_CERT` / `LOCALBOX_KEY`,
+`LOCALBOX_SERVER_URL`, `LOCALBOX_CLIENT_DIR`, `LOCALBOX_GAMES`, `LOCALBOX_DEBUG=1`.
 
 ---
 
