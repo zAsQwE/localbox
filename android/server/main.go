@@ -289,7 +289,14 @@ func loadConfig(baseDir string) serverConfig {
 		if v, err := strconv.Atoi(os.Getenv("LOCALBOX_PORT")); err == nil && v > 0 {
 			port = v
 		}
-		cfg.Listen = []listenSpec{{Port: port, TLS: false}}
+		// LOCALBOX_TLS=1 → слушать этот порт по https (нужно, если игра идёт по https/wss).
+		// Серт/ключ: LOCALBOX_CERT / LOCALBOX_KEY (или дефолтные certs/…).
+		tlsOn := os.Getenv("LOCALBOX_TLS") == "1" || os.Getenv("LOCALBOX_TLS") == "true"
+		cfg.Listen = []listenSpec{{Port: port, TLS: tlsOn}}
+		if tlsOn {
+			cfg.SSL.Cert = envOr("LOCALBOX_CERT", cfg.SSL.Cert)
+			cfg.SSL.Key = envOr("LOCALBOX_KEY", cfg.SSL.Key)
+		}
 	}
 	return cfg
 }
