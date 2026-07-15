@@ -85,14 +85,18 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+	bound := 0
 	for _, spec := range cfg.Listen {
 		spec := spec
 		srv := &http.Server{Handler: handler}
 		ln, err := net.Listen("tcp", ":"+itoa(spec.Port))
 		if err != nil {
-			logf("Порт %d: %v", spec.Port, err)
-			os.Exit(1)
+			// Порт занять не удалось — НЕ падаем, пропускаем. На Android/Termux без root
+			// порты <1024 (80/443) недоступны; сервер продолжит на высоких портах.
+			logf("порт %d пропущен (%v)", spec.Port, err)
+			continue
 		}
+		bound++
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -106,6 +110,10 @@ func main() {
 				logf("Порт %d остановлен: %v", spec.Port, err)
 			}
 		}()
+	}
+	if bound == 0 {
+		logf("Ни один порт не удалось занять. На Android без root задайте высокий порт: LOCALBOX_PORT=9999")
+		os.Exit(1)
 	}
 	logf("serverUrl = %s | клиент = %s", serverURL, orNone(clientDir))
 	wg.Wait()
