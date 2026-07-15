@@ -151,13 +151,19 @@ try {
     process.exit(1);
 }
 
+let boundPorts = 0;
 servers.forEach(({ s, port }) => {
     s.on("upgrade", onUpgrade);
     s.on("error", (err) => {
-        if (err.code === "EADDRINUSE") console.error("Порт " + port + " занят.");
-        else if (err.code === "EACCES") console.error("Нет прав на порт " + port + " (нужен setcap или root).");
-        else console.error("Ошибка на порту " + port + ":", err.message);
-        process.exit(1);
+        // НЕ падаем: пропускаем недоступный порт, сервер продолжит на остальных.
+        // На Android/Termux без root порты 80/443 недоступны (EACCES) — останутся 38202/38203.
+        if (err.code === "EACCES") console.error("порт " + port + " без прав недоступен (Android без root / нет setcap) — пропускаю");
+        else if (err.code === "EADDRINUSE") console.error("порт " + port + " занят — пропускаю");
+        else console.error("порт " + port + ": " + err.message + " — пропускаю");
     });
-    s.listen(port, () => console.log("LocalBox server: порт " + port));
+    s.listen(port, () => { boundPorts++; console.log("LocalBox server: порт " + port); });
 });
+// Если через 3с не занялся ни один порт — сообщаем внятно.
+setTimeout(() => {
+    if (boundPorts === 0) console.error("Ни один порт не занят. На Android без root дайте права (setcap) или используйте другой порт.");
+}, 3000);

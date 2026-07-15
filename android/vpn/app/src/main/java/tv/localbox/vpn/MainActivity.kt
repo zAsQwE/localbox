@@ -6,7 +6,9 @@ package tv.localbox.vpn
 //
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
@@ -24,6 +26,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var ipEdit: EditText
     private lateinit var status: TextView
+    private lateinit var prefs: SharedPreferences
 
     private val prepareVpn = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         if (res.resultCode == RESULT_OK) startVpn()
@@ -37,8 +40,14 @@ class MainActivity : AppCompatActivity() {
         ipEdit = findViewById(R.id.ip)
         status = findViewById(R.id.status)
 
+        // сохранённый IP: подставляем последний введённый
+        prefs = getSharedPreferences("localbox", Context.MODE_PRIVATE)
+        prefs.getString("ip", null)?.let { if (it.isNotBlank()) ipEdit.setText(it) }
+
         findViewById<Button>(R.id.start).setOnClickListener {
-            if (ipEdit.text.toString().trim().isEmpty()) { toast("Впиши IP сервера"); return@setOnClickListener }
+            val ip = ipEdit.text.toString().trim()
+            if (ip.isEmpty()) { toast("Впиши IP сервера"); return@setOnClickListener }
+            prefs.edit().putString("ip", ip).apply()   // сохраняем IP
             ensureNotifPermission()
             val prep = VpnService.prepare(this)
             if (prep != null) prepareVpn.launch(prep) else startVpn()
