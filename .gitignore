@@ -42,3 +42,6 @@ runtime/
 launcher/build/
 launcher/dist/
 *.spec
+
+# Android-подпроект временно скрыт (в разработке, экспериментальный VPN)
+/android/
