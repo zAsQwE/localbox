@@ -36,7 +36,7 @@ if [ -d server/node_modules/express ]; then
     ok "уже установлены"
 else
     echo "  npm i ..."
-    if ( cd engine && npm i ); then ok "установлены"; else warn "npm i не удался"; exit 1; fi
+    if ( cd server && npm i ); then ok "установлены"; else warn "npm i не удался"; exit 1; fi
 fi
 
 # 3) Английский клиент (client/)
