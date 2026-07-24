@@ -7,6 +7,7 @@
 const u = require("./util.js");
 const mgr = require("./room.js");
 const artifacts = require("./artifacts.js");
+const render = require("./render.js");
 
 const DEBUG = process.env.LOCALBOX_DEBUG === "1";
 
@@ -59,7 +60,9 @@ function attach(client, roomCode) {
     client.sendEcast = (msg, re) => {
         const room = mgr.get(client.roomCode);
         const full = Object.assign({ pc: room ? room.nextPc() : 0, re }, msg);
-        try { client.send(JSON.stringify(full)); } catch { /* закрыт */ }
+        const s = JSON.stringify(full);
+        if (DEBUG) console.log("[ec> " + client.id + "/" + (client.role || "?") + "] " + s.slice(0, 400));
+        try { client.send(s); } catch { /* закрыт */ }
     };
     client.sendOk = (re) => client.sendEcast({ opcode: "ok", result: {} }, re);
     client.sendError = (re, code, extra) => client.sendEcast({ opcode: "error", result: { code, msg: extra || ERR[code] || "error" } }, re);
@@ -101,7 +104,7 @@ module.exports = function handleConnection(client, code, query) {
     console.log("[ecast] " + role + " вошёл в комнату " + code + (query.name ? " (" + query.name + ")" : ""));
 
     client.on("message", (data) => {
-        if (DEBUG) console.log("[ec< " + client.id + "] " + data.toString().slice(0, 240));
+        if (DEBUG) console.log("[ec< " + client.id + "/" + (client.role || "?") + "] " + data.toString().slice(0, 400));
         let msg;
         try { msg = JSON.parse(data.toString()); } catch { return client.sendError(undefined, 2001); }
         if (!msg.opcode || typeof msg.opcode !== "string") return client.sendError(undefined, 2002);
@@ -125,6 +128,13 @@ function dispatch(client, msg) {
     const action = op.split("/").pop();
     const p = msg.params;
     let ok = true;
+
+    // Админ-мьют: правки сущностей от заглушённого игрока игнорируем (но отвечаем ok, чтобы клиент не завис).
+    if (room.muted && room.muted.has(client.profileId)
+        && ["object", "text", "number", "doodle", "text-map"].indexOf(type) !== -1
+        && ["create", "set", "update", "increment", "decrement", "push", "sync"].indexOf(action) !== -1) {
+        return client.sendOk(msg.seq);
+    }
 
     switch (op) {
         case "room/lock":
@@ -186,6 +196,10 @@ function dispatch(client, msg) {
         case "game/started": case "game/metric": case "game/ended": case "text/filter":
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             break;
+        case "external-request/create":
+            // Рендер выступления Додо Ре Ми и пр. — сохраняем payload (спека) + позже сам рендер.
+            render.handleExternalRequest(client, room, msg);
+            return;
         case "artifact/create": {
             if (!p.blob || !p.appId || !p.categoryId) return client.sendError(msg.seq, 2004);
             const artifactId = artifacts.create(p.categoryId, { appId: p.appId, categoryId: p.categoryId, blob: p.blob, isProfane: false, isTextFlagged: false });

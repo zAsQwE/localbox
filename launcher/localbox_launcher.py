@@ -14,6 +14,7 @@
 
 import os
 import queue
+import subprocess
 import sys
 import threading
 
@@ -147,6 +148,10 @@ def run_gui():
         host = url_var.get().strip() or "localhost"
         start_btn.configure(state="disabled")
         def w():
+            # серт должен покрывать этот адрес, иначе хост/телефон выдаёт «bad certificate»
+            if not certs.cert_ok_for(host):
+                log("Серт не подходит под этот адрес — генерирую (mkcert)…")
+                certs.ensure_cert(host, log=log, extra_names=[plat.local_ip()], force=True)
             if not engine.write_config(host, log=log):
                 root.after(0, lambda: start_btn.configure(state="normal")); return
             if not engine.deps_installed() and not engine.install_deps(log=log):
@@ -170,22 +175,33 @@ def run_gui():
         win = tk.Toplevel(root)
         win.title("Настройки LocalBox")
         win.configure(bg=BG)
-        win.geometry("560x520")
-        win.minsize(520, 480)
+        win.geometry("760x560")
+        win.minsize(700, 420)
         win.transient(root)
         cfg = settings.load()
         dl_var = tk.BooleanVar(value=cfg.get("download_missing", True))
         tts_var = tk.StringVar(value=cfg.get("tts_engine", "auto"))
         voice_var = tk.StringVar(value=cfg.get("tts_voice", "eugene"))
         tts_python_var = tk.StringVar(value=cfg.get("tts_python", ""))
-        WRAP = 496
+        dodo_var = tk.BooleanVar(value=cfg.get("dodo_render", False))
+        instr_var = tk.DoubleVar(value=float(cfg.get("render_instr", 4.0)))
+        back_var = tk.DoubleVar(value=float(cfg.get("render_backing", 0.45)))
+        admin_var = tk.StringVar(value=cfg.get("admin_nicks", ""))
+        WRAP = 330
 
         outer = ttk.Frame(win, padding=18)
         outer.pack(fill="both", expand=True)
         ttk.Label(outer, text="Настройки", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+        # Две колонки: слева сеть+озвучка, справа Додо Ре Ми+админ-читы.
+        cols = ttk.Frame(outer)
+        cols.pack(fill="both", expand=True)
+        left = ttk.Frame(cols)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 7))
+        right = ttk.Frame(cols)
+        right.pack(side="left", fill="both", expand=True, padx=(7, 0))
 
         # --- сеть / локальный режим ---
-        card = ttk.Frame(outer, style="Card.TFrame", padding=14)
+        card = ttk.Frame(left, style="Card.TFrame", padding=14)
         card.pack(fill="x")
         ttk.Checkbutton(card, text="Скачивать недостающие текстуры с jackbox.ru",
                         variable=dl_var, style="Card.TCheckbutton").pack(anchor="w")
@@ -195,7 +211,7 @@ def run_gui():
                   ).pack(anchor="w", pady=(6, 0))
 
         # --- озвучка (TTS) ---
-        card2 = ttk.Frame(outer, style="Card.TFrame", padding=14)
+        card2 = ttk.Frame(left, style="Card.TFrame", padding=14)
         card2.pack(fill="x", pady=(12, 0))
         ttk.Label(card2, text="Озвучка (Mad Verse City и др.)", style="Card.TLabel",
                   font=("", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -241,11 +257,77 @@ def run_gui():
                        "основной python слишком новый и ML-библиотеки (torch/coqui) не ставятся."
                   ).grid(row=5, column=0, columnspan=4, sticky="w")
 
+        # --- Додо Ре Ми (nopus-opus) ---
+        card3 = ttk.Frame(right, style="Card.TFrame", padding=14)
+        card3.pack(fill="x", pady=(12, 0))
+        ttk.Checkbutton(card3, text="Додо Ре Ми — рендер выступления (локально)",
+                        variable=dodo_var, style="Card.TCheckbutton").pack(anchor="w")
+        ttk.Label(card3, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="Включи, чтобы играть в Додо Ре Ми. Что нужно:\n"
+                       "  • ffmpeg (в PATH) — без него рендер не соберётся.\n"
+                       "  • Бэкинги песен (для музыки): положи backing.ogg каждой песни в\n"
+                       "      server/render/nopus-opus/songs/<slug>/backing.ogg\n"
+                       "    Взять из установленной игры: …/games/NopusOpus/songs/<slug>/.\n"
+                       "  • Сэмплы инструментов докачаются сами при первом рендере.\n"
+                       "Без бэкингов выступление соберётся, но без музыки (только ноты)."
+                  ).pack(anchor="w", pady=(6, 0))
+
+        def open_dodo_dir():
+            d = plat.repo_root() / "server" / "render" / "nopus-opus" / "songs"
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+                if plat.is_windows():
+                    os.startfile(str(d))  # noqa: S606
+                elif plat.is_linux():
+                    subprocess.Popen(["xdg-open", str(d)])
+                else:
+                    subprocess.Popen(["open", str(d)])
+                log(f"Папка бэкингов: {d}")
+            except Exception as e:  # noqa: BLE001
+                log(f"Папка бэкингов: {d} (открыть не удалось: {e})")
+        ttk.Button(card3, text="📁 Открыть папку песен", command=open_dodo_dir).pack(anchor="w", pady=(8, 0))
+
+        # Громкость рендера (инструмент / бэкинг) — ползунки.
+        vol = ttk.Frame(card3, style="Card.TFrame")
+        vol.pack(fill="x", pady=(10, 0))
+        instr_lbl = ttk.Label(vol, style="Card.TLabel", text=f"Громкость инструмента: {instr_var.get():.1f}")
+        instr_lbl.grid(row=0, column=0, sticky="w")
+        ttk.Scale(vol, from_=1.0, to=10.0, variable=instr_var, orient="horizontal",
+                  command=lambda v: instr_lbl.configure(text=f"Громкость инструмента: {float(v):.1f}")
+                  ).grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        back_lbl = ttk.Label(vol, style="Card.TLabel", text=f"Громкость бэкинга (музыки): {back_var.get():.2f}")
+        back_lbl.grid(row=2, column=0, sticky="w")
+        ttk.Scale(vol, from_=0.0, to=1.0, variable=back_var, orient="horizontal",
+                  command=lambda v: back_lbl.configure(text=f"Громкость бэкинга (музыки): {float(v):.2f}")
+                  ).grid(row=3, column=0, sticky="ew")
+        vol.columnconfigure(0, weight=1)
+        ttk.Label(card3, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="Инструмент громче = отчётливее ноты; бэкинг тише = меньше музыки. Применяется к следующему рендеру."
+                  ).pack(anchor="w", pady=(4, 0))
+
+        # --- Админ-читы ---
+        card4 = ttk.Frame(right, style="Card.TFrame", padding=14)
+        card4.pack(fill="x", pady=(12, 0))
+        ttk.Label(card4, text="Админ-читы (панель /admin)", style="Card.TLabel",
+                  font=("", 11, "bold")).pack(anchor="w")
+        ttk.Label(card4, text="Ники админов (через запятую):", style="Card.TLabel").pack(anchor="w", pady=(6, 2))
+        ttk.Entry(card4, textvariable=admin_var).pack(fill="x")
+        ttk.Label(card4, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="Кто вписан — заходит на https://АДРЕС/admin (браузером) и получает: God view "
+                       "(видеть секретные ответы/голоса/рисунки всех), подмену значений (напр. изменить "
+                       "ответ игрока в Бредовухе), кик/бан/мьют/переименование. Пусто = панель выключена. "
+                       "Только для игры с друзьями."
+                  ).pack(anchor="w", pady=(6, 0))
+
         def save_close():
             cfg["download_missing"] = dl_var.get()
             cfg["tts_engine"] = tts_var.get()
             cfg["tts_voice"] = voice_var.get()
             cfg["tts_python"] = tts_python_var.get().strip()
+            cfg["dodo_render"] = dodo_var.get()
+            cfg["render_instr"] = round(float(instr_var.get()), 2)
+            cfg["render_backing"] = round(float(back_var.get()), 2)
+            cfg["admin_nicks"] = admin_var.get().strip()
             settings.save(cfg)
             log(f"Настройки сохранены (озвучка: {tts_var.get()} / {voice_var.get()}). "
                 "Применятся при следующем запуске сервера.")
@@ -255,6 +337,14 @@ def run_gui():
         bar.pack(fill="x", side="bottom", pady=(16, 0))
         ttk.Button(bar, text="Сохранить", style="Accent.TButton", command=save_close).pack(side="right")
         ttk.Button(bar, text="Отмена", command=win.destroy).pack(side="right", padx=8)
+
+        # Подгоняем окно под содержимое (две колонки) — чтобы всё влезало без ручного растягивания.
+        win.update_idletasks()
+        rw, rh = outer.winfo_reqwidth() + 8, outer.winfo_reqheight() + 8
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        w, h = min(max(rw, 740), sw - 60), min(rh, sh - 100)
+        win.geometry(f"{w}x{h}")
+        win.minsize(min(w, 700), min(h, 420))
 
     cert_btn.configure(command=on_cert)
     ports_btn.configure(command=on_ports)
@@ -333,8 +423,9 @@ def run_server_cli(ip, no_web, local=None, tts=None, voice=None):
     if not engine.find_node():
         print("Node.js не найден. Установите node или положите его в ./runtime/. См. README."); sys.exit(1)
 
-    # 1) сертификат
-    certs.ensure_cert(ip, log=print, extra_names=[plat.local_ip(), "localhost"], force=False)
+    # 1) сертификат (перегенерируем, если нет/не покрывает адрес — иначе «bad certificate»)
+    if not certs.cert_ok_for(ip):
+        certs.ensure_cert(ip, log=print, extra_names=[plat.local_ip(), "localhost"], force=True)
     # 2) конфиг движка
     engine.write_config(ip, log=print)
     # 3) права на порты 80/443

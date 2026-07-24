@@ -17,9 +17,15 @@ const handleBlobcast = require("./lib/blobcast-ws.js");
 const blobcastRouter = require("./lib/blobcast.js");
 const state = require("./lib/state.js");
 const tts = require("./lib/tts.js");
+const render = require("./lib/render.js");
+const admin = require("./lib/admin.js");
 
 const config = JSON.parse(fs.readFileSync(__dirname + "/config.json", "utf8"));
 state.serverUrl = config.serverUrl || "localhost";
+render.setState(state);
+render.logStatus();   // печатает статус Додо Ре Ми (ffmpeg/бэкинги), если поддержка включена
+mgr.setAdminHook(admin.onRoomEvent);   // God view: события комнат → админ-панель
+if (admin.enabled()) console.log("[admin] читы включены для ников: " + admin.adminList().join(", ") + " · панель: https://" + state.serverUrl + "/admin");
 // Таблица игр appId<->appTag + лимиты (нужна, чтобы комната сообщала клиенту верный appTag).
 try {
     const gj = JSON.parse(fs.readFileSync(__dirname + "/games.json", "utf8"));
@@ -35,7 +41,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use((req, res, next) => {
     // Логируем только значимое (API/комнаты/сокеты), а не каждую картинку/скрипт — иначе спам и лаги.
     const pth = req.path;
-    if (req.method !== "GET" || /^\/(api|room|socket\.io|artifact|storage|accessToken)/.test(pth))
+    if (process.env.LOCALBOX_DEBUG === "1" || req.method !== "GET" || /^\/(api|room|socket\.io|artifact|storage|accessToken|render|tts)/.test(pth))
         console.log(req.method, req.originalUrl, req.body && Object.keys(req.body).length ? JSON.stringify(req.body).slice(0, 300) : "");
     const origin = req.headers.origin;
     if (origin) res.header("Access-Control-Allow-Origin", origin);
@@ -103,17 +109,36 @@ app.get("/tts/:file", (req, res) => {
     fs.createReadStream(f).on("error", () => res.sendStatus(404)).pipe(res);
 });
 
+// Отрендеренные выступления Додо Ре Ми (mp3).
+app.get("/render/:file", (req, res) => {
+    const f = path.join(render.OUT_DIR, path.basename(req.params.file));
+    if (!fs.existsSync(f)) return res.sendStatus(404);
+    res.type("audio/mpeg");
+    fs.createReadStream(f).on("error", () => res.sendStatus(404)).pipe(res);
+});
+
 // прочие маршруты клиента
 app.post("/api/v2/controller/state", (req, res) => res.sendStatus(200));
 app.get("/api/v2/rooms/:code/play", (req, res) =>
     res.status(400).type("text/plain").send('Bad Request\n{"ok":false,"error":"the client is not using the websocket protocol"}'));
+
+// Админ-панель (читы) — доступна по нику из LOCALBOX_ADMINS.
+admin.mountHttp(app);
 
 // Blobcast (старые игры): /room, /socket.io/1, /accessToken, /artifact, /storage/content, ...
 app.use(blobcastRouter);
 
 // раздача веб-клиента (моё middleware) и 404
 app.use(require("./client.js"));
-app.use((req, res) => res.status(404).type("text/plain").send("404 page not found"));
+app.use((req, res) => {
+    // Явно логируем НЕ найденные ассеты (картинки/шрифты/css/js) — чтобы видеть, какой файл
+    // игра просит, но сервер не отдаёт (напр. пропавшая «ткань»/фон). Не спамим favicon и т.п.
+    const p = (req.url.split("?")[0] || "");
+    if (req.method === "GET" && /\.(png|jpe?g|gif|webp|svg|css|js|woff2?|ttf|ogg|mp3|json)$/i.test(p) && !/favicon|apple-touch/.test(p)) {
+        console.log("[404] нет файла: " + p);
+    }
+    res.status(404).type("text/plain").send("404 page not found");
+});
 
 // ---- сервера + апгрейд WebSocket ----
 const wss = new WebSocketServer({ noServer: true });
@@ -121,6 +146,13 @@ const wss = new WebSocketServer({ noServer: true });
 function onUpgrade(request, socket, head) {
     const [reqPath, qs] = request.url.split("?");
     console.log("[ws] апгрейд:", reqPath, qs ? "?" + qs : "");
+    // Админ-панель: /admin/ws?nick=...
+    if (reqPath === "/admin/ws") {
+        const q = {};
+        (qs || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) q[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); });
+        wss.handleUpgrade(request, socket, head, (client) => admin.handleWs(client, q));
+        return;
+    }
     // Blobcast: socket.io 0.9 — /socket.io/1/websocket/<token>
     if (/^\/socket\.io\/1\/websocket\/[0-9a-f]+$/.test(reqPath)) {
         wss.handleUpgrade(request, socket, head, (client) => handleBlobcast(client));
@@ -154,6 +186,13 @@ try {
 let boundPorts = 0;
 servers.forEach(({ s, port }) => {
     s.on("upgrade", onUpgrade);
+    // Диагностика: если хост/клиент пытается подключиться, но рвётся на TLS (недоверенный
+    // самоподписанный серт) — обычный лог запросов это не покажет. Логируем такие обрывы.
+    s.on("tlsClientError", (err, sock) => {
+        const ip = sock && sock.remoteAddress;
+        if (err && !/ECONNRESET|EPIPE/.test(err.code || "")) console.error("[tls] обрыв на TLS (порт " + port + ", от " + ip + "): " + (err.message || err.code));
+    });
+    s.on("clientError", (err, sock) => { try { sock.destroy(); } catch { /* ignore */ } });
     s.on("error", (err) => {
         // НЕ падаем: пропускаем недоступный порт, сервер продолжит на остальных.
         // На Android/Termux без root порты 80/443 недоступны (EACCES) — останутся 38202/38203.

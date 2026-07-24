@@ -19,6 +19,10 @@ DEFAULTS = {
     "tts_engine": "auto",   # auto | silero | piper | espeak | silent
     "tts_voice": "eugene",  # голос Silero: eugene | baya | kseniya | xenia | aidar | random
     "tts_python": "",       # путь к python с TTS-библиотеками (напр. venv на 3.11); пусто = python лаунчера
+    "dodo_render": False,   # поддержка Додо Ре Ми (nopus-opus): локальный рендер выступления (нужен ffmpeg)
+    "render_instr": 4.0,    # громкость инструмента в рендере Додо Ре Ми (LOCALBOX_RENDER_INSTR)
+    "render_backing": 0.45, # громкость бэкинга (0..1) в рендере (LOCALBOX_RENDER_BACKING)
+    "admin_nicks": "",      # ники (через запятую), которым доступна админ-панель /admin (читы)
 }
 
 TTS_ENGINES = ["auto", "silero", "piper", "espeak", "silent"]

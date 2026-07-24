@@ -8,6 +8,10 @@ const u = require("./util.js");
 const translate = require("./translate.js");
 const textmap = require("./textmap.js");
 
+// Хук админ-панели (устанавливается из server.js: mgr.setAdminHook). Событие: {t:"entity"|"drop"|"players", ...}.
+let adminHook = null;
+function emitAdmin(code, ev) { if (adminHook) { try { adminHook(code, ev); } catch { /* ignore */ } } }
+
 // Тело сущности для отправки клиенту: {key, ...content, version, from}.
 function entityContent(e) {
     switch (e.type) {
@@ -48,6 +52,7 @@ class Room {
         this.audienceClients = {}; // clientId -> ws client
         this._audiencePush = {};   // key -> таймер троттлинга рассылки зрителям
         this.blobcast = false;     // true, если хост — старая игра (Blobcast): игрокам нужен bc:customer
+        this.muted = new Set();    // profileId заглушённых игроков (админ-мьют) — их правки игнорируются
     }
 
     nextPc() { return this.pc++; }
@@ -123,6 +128,7 @@ class Room {
         const e = this.entities[key];
         if (!e) return;
         const msg = { opcode: e.type, result: this.getBody(key) };
+        emitAdmin(this.code, { t: "entity", type: e.type, body: msg.result });   // God view: любая правка сущности
         if (notifyHost) this.sendToHost(msg);
         Object.values(this.players).forEach((p) => {
             if (p.profileId === exceptProfileId) return;
@@ -190,7 +196,31 @@ class Room {
         e.version += 1; e.from = fromProfileId != null ? fromProfileId : e.from;
         return true;
     }
-    drop(key) { delete this.entities[key]; }
+    drop(key) { delete this.entities[key]; emitAdmin(this.code, { t: "drop", key }); }
+
+    // ---- админ-действия (читы) ----
+    kick(profileId, ban) {
+        const p = this.players[profileId];
+        if (!p) return false;
+        if (ban && p.userId && this.banned.indexOf(p.userId) === -1) this.banned.push(p.userId);
+        try { this.sendTo(profileId, { opcode: "room/exit", result: { cause: ban ? 4 : 5 } }); } catch { /* ignore */ }
+        try { if (p.client) p.client.close(1000); } catch { /* ignore */ }
+        this.sendToHost({ opcode: "client/kicked", result: { id: profileId, role: p.role, reason: "admin", banned: !!ban } });
+        this.sendToHost({ opcode: "client/disconnected", result: { id: profileId, role: p.role } });
+        delete this.players[profileId];
+        this.muted.delete(profileId);
+        emitAdmin(this.code, { t: "players" });
+        return true;
+    }
+    setMute(profileId, on) { if (on) this.muted.add(profileId); else this.muted.delete(profileId); return true; }
+    renamePlayer(profileId, name) {
+        const p = this.players[profileId];
+        if (!p || !name) return false;
+        p.name = name;
+        const profile = { id: profileId, roles: {} }; profile.roles[p.role] = { name };
+        this.sendToHost({ opcode: "client/connected", result: { id: profileId, userId: p.userId, name, role: p.role, reconnect: true, profile } });
+        return true;
+    }
 
     // ---- text-map (совместный текст, CRDT Yjs) ----
     createTextMap(key, aclRaw, initialText) {
@@ -292,6 +322,7 @@ class Room {
         } else if (role !== "audience") {
             this.sendToHost({ opcode: "client/connected", result: { id: profileId, userId, name, role, reconnect, profile } });
         }
+        emitAdmin(this.code, { t: "players" });   // обновить ростер в админ-панели
         return true;
     }
 
@@ -331,4 +362,6 @@ module.exports = {
     get: (code) => rooms[code],
     add: (room) => { rooms[room.code] = room; return room; },
     remove: (code) => { delete rooms[code]; },
+    list: () => Object.values(rooms),
+    setAdminHook: (fn) => { adminHook = fn; },
 };
