@@ -15,15 +15,71 @@
 """
 
 import ipaddress
+import platform as _pyplat
 import shutil
+import ssl
+import stat
 import subprocess
+import urllib.request
 from pathlib import Path
 
 from . import platform as plat
 
+# Портативный mkcert скачиваем сами, если его нет в системе (особенно для старых Windows,
+# где нет ни winget, ни openssl). Один статический бинарник, установка не нужна.
+MKCERT_VERSION = "v1.4.4"
+
 
 def _which(name):
     return shutil.which(name)
+
+
+def _mkcert_local_path() -> Path:
+    exe = "mkcert.exe" if plat.is_windows() else "mkcert"
+    return plat.repo_root() / "runtime" / exe
+
+
+def _mkcert_asset() -> str:
+    sysname = "windows" if plat.is_windows() else ("darwin" if plat.is_macos() else "linux")
+    m = (_pyplat.machine() or "").lower()
+    arch = "arm64" if m in ("arm64", "aarch64") else "amd64"
+    name = f"mkcert-{MKCERT_VERSION}-{sysname}-{arch}"
+    return name + ".exe" if plat.is_windows() else name
+
+
+def _ensure_mkcert(log):
+    """Возвращает путь к mkcert: из PATH, из локального кэша, иначе скачивает с GitHub.
+
+    Скачивание не требует winget/openssl — только интернет один раз. Возвращает None, если
+    скачать не удалось (тогда откатимся на openssl или инструкцию).
+    """
+    found = _which("mkcert")
+    if found:
+        return found
+    local = _mkcert_local_path()
+    if local.exists():
+        return str(local)
+    asset = _mkcert_asset()
+    url = f"https://github.com/FiloSottile/mkcert/releases/download/{MKCERT_VERSION}/{asset}"
+    tmp = local.with_name(local.name + ".part")
+    try:
+        log(f"mkcert не найден — скачиваю {asset} (~5 МБ, один раз)…")
+        local.parent.mkdir(parents=True, exist_ok=True)
+        req = urllib.request.Request(url, headers={"User-Agent": "LocalBox"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:  # noqa: S310
+            shutil.copyfileobj(r, f)
+        tmp.replace(local)
+        if not plat.is_windows():
+            local.chmod(local.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        log(f"mkcert готов: {local}")
+        return str(local)
+    except Exception as e:  # noqa: BLE001
+        log(f"Не удалось скачать mkcert ({e}). Откат на openssl/самоподписанный.")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return None
 
 
 def is_ip(value: str) -> bool:
@@ -36,6 +92,23 @@ def is_ip(value: str) -> bool:
 
 def cert_files(certs_dir: Path):
     return certs_dir / "localbox.pem", certs_dir / "localbox-key.pem"
+
+
+def _cert_sans(cert_path: Path):
+    """Список SAN-имён из PEM-сертификата (через stdlib ssl, без внешних зависимостей)."""
+    try:
+        info = ssl._ssl._test_decode_cert(str(cert_path))  # noqa: SLF001
+        return [val for _typ, val in info.get("subjectAltName", ())]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def cert_ok_for(host: str) -> bool:
+    """Покрывает ли текущий серт этот адрес (иначе хост/телефон выдаёт «bad certificate»)."""
+    cert, key = cert_files(plat.certs_dir())
+    if not cert.exists() or not key.exists():
+        return False
+    return host in _cert_sans(cert)
 
 
 def _dedup(names):
@@ -69,14 +142,14 @@ def generate_cert(names, log=print, force: bool = False) -> bool:
 
     log(f"Имена/IP в сертификате: {', '.join(names)}")
 
-    if _which("mkcert"):
-        return _generate_mkcert(names, cert, key, log)
+    mk = _ensure_mkcert(log)
+    if mk:
+        return _generate_mkcert(mk, names, cert, key, log)
     if _which("openssl"):
         return _generate_openssl(names, cert, key, log)
 
-    log("Не найден ни mkcert, ни openssl.")
-    log("Установите mkcert (https://github.com/FiloSottile/mkcert) — он создаёт доверенный")
-    log("локальный сертификат автоматически (и для IP), либо установите openssl и повторите.")
+    log("Не найден mkcert (не удалось скачать) и нет openssl.")
+    log("Проверьте интернет и повторите, либо поставьте mkcert/openssl вручную.")
     return False
 
 
@@ -100,44 +173,44 @@ def ensure_local_cert(local_ip: str, log=print, force: bool = True) -> bool:
     )
 
 
-def _mkcert_caroot():
+def _mkcert_caroot(mk="mkcert"):
     try:
-        r = subprocess.run(["mkcert", "-CAROOT"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
+        r = subprocess.run([mk, "-CAROOT"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
         return r.stdout.strip()
     except Exception:  # noqa: BLE001
         return None
 
 
-def _generate_mkcert(names, cert: Path, key: Path, log) -> bool:
+def _generate_mkcert(mk, names, cert: Path, key: Path, log) -> bool:
     log("Генерация доверенного сертификата через mkcert…")
 
-    # -install добавляет корневой CA в доверие. На Arch/CachyOS mkcert ошибочно зовёт
-    # update-ca-certificates (Debian) вместо update-ca-trust и прерывается ДО установки в
-    # браузерное хранилище (NSS) — поэтому браузер выдаёт ERR_CERT_AUTHORITY_INVALID.
-    # Сам CA создаётся, leaf-сертификат генерируется. Доверие в браузер/систему добавим сами.
-    subprocess.run(["mkcert", "-install"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # -install добавляет корневой CA в доверие (на Windows — в системное хранилище, один раз
+    # запрос прав администратора). На Arch/CachyOS mkcert ошибочно зовёт update-ca-certificates
+    # (Debian) вместо update-ca-trust и прерывается ДО установки в браузерное хранилище (NSS) —
+    # поэтому доверие в браузер/систему добавляем сами ниже.
+    subprocess.run([mk, "-install"], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     try:
         # mkcert принимает и доменные имена, и IP как обычные аргументы.
         subprocess.run(
-            ["mkcert", "-cert-file", str(cert), "-key-file", str(key), *names],
+            [mk, "-cert-file", str(cert), "-key-file", str(key), *names],
             check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         log(f"Готово: {cert}")
-        trust_ca(log=log)
+        trust_ca(log=log, mk=mk)
         return True
     except subprocess.CalledProcessError as e:
         log(f"mkcert не смог сгенерировать сертификат: {e.stderr or e}")
         return False
 
 
-def trust_ca(log=print) -> None:
+def trust_ca(log=print, mk="mkcert") -> None:
     """Добавляет корневой CA mkcert в доверенные — браузер (NSS) и подсказка для системы.
 
     На Linux Chrome/Chromium используют NSS-базу ~/.pki/nssdb (отдельно от системного доверия),
     поэтому без этого шага браузер не доверяет проксируемым ресурсам.
     """
-    caroot = _mkcert_caroot()
+    caroot = _mkcert_caroot(mk)
     if not caroot:
         return
     rootca = Path(caroot) / "rootCA.pem"

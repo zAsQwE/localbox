@@ -167,6 +167,19 @@ class EngineProcess:
         env["LOCALBOX_TTS_VOICE"] = _s.get("tts_voice", "eugene")
         _tts_py = (_s.get("tts_python") or "").strip()
         env["LOCALBOX_PYTHON"] = _tts_py or (sys.executable if not getattr(sys, "frozen", False) else (shutil.which("python3") or "python3"))
+        # Додо Ре Ми: включаем локальный рендер выступления, если в настройках включено
+        # (либо если флаг уже задан в окружении, напр. из start-server.bat).
+        if _s.get("dodo_render") or os.environ.get("LOCALBOX_DODO") == "1":
+            env["LOCALBOX_DODO"] = "1"
+            self.on_log("Додо Ре Ми: поддержка включена (локальный рендер выступления, нужен ffmpeg).")
+        # Громкость рендера Додо Ре Ми (инструмент / бэкинг).
+        env["LOCALBOX_RENDER_INSTR"] = str(_s.get("render_instr", 4.0))
+        env["LOCALBOX_RENDER_BACKING"] = str(_s.get("render_backing", 0.45))
+        # Админ-читы: ники (через запятую), которым доступна панель /admin.
+        _admins = (_s.get("admin_nicks") or os.environ.get("LOCALBOX_ADMINS") or "").strip()
+        if _admins:
+            env["LOCALBOX_ADMINS"] = _admins
+            self.on_log(f"Админ-панель включена для: {_admins} — открой https://{self.server_url}/admin")
         if self.no_web:
             env["LOCALBOX_NO_CLIENT"] = "1"
             self.on_log("Режим -no-web: веб-клиент не раздаётся (только игровой сервер).")

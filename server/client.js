@@ -12,6 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const admin = require("./lib/admin.js");
 
 const CLIENT_DIR = path.resolve(__dirname, process.env.LOCALBOX_CLIENT_DIR || "../client");
 // Фоллбэк-каталог: если файла нет в основном (напр. русская тонкая оболочка) — берём отсюда
@@ -101,7 +102,13 @@ function sendBuffer(buf, ext, req, res) {
     if (TEXT_EXT.has(ext)) {
         const reqHost = (req.headers.host || "").split(":")[0] || null;
         const secure = !!(req.socket && req.socket.encrypted); // страница отдана по https?
-        res.end(rewrite(buf.toString("utf8"), reqHost, secure));
+        let html = rewrite(buf.toString("utf8"), reqHost, secure);
+        // Вставляем админ-оверлей (панельку читов) в HTML-страницы, если включены админы.
+        if (ext === ".html" && admin.enabled()) {
+            const tag = '<script src="/admin/overlay.js"></script>';
+            html = html.includes("</body>") ? html.replace("</body>", tag + "</body>") : html + tag;
+        }
+        res.end(html);
     } else {
         res.end(buf);
     }
