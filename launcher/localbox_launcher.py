@@ -322,7 +322,9 @@ def run_gui():
                         variable=dodo_var, style="Card.TCheckbutton").pack(anchor="w")
         ttk.Label(card3, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
                   text="Включи, чтобы играть в Додо Ре Ми. Что нужно:\n"
-                       "  • ffmpeg (в PATH) — без него рендер не соберётся.\n"
+                       "  • ffmpeg — в PATH, либо просто положи ffmpeg"
+                       + (".exe" if plat.is_windows() else "") + " в папку runtime/ в корне\n"
+                       "      проекта (надёжнее, если системная установка не видна по PATH).\n"
                        "  • Бэкинги песен (для музыки): положи backing.ogg каждой песни в\n"
                        "      server/render/nopus-opus/songs/<slug>/backing.ogg\n"
                        "    Взять из установленной игры: …/games/NopusOpus/songs/<slug>/.\n"
@@ -330,8 +332,7 @@ def run_gui():
                        "Без бэкингов выступление соберётся, но без музыки (только ноты)."
                   ).pack(anchor="w", pady=(6, 0))
 
-        def open_dodo_dir():
-            d = plat.repo_root() / "server" / "render" / "nopus-opus" / "songs"
+        def open_folder(d, label):
             try:
                 d.mkdir(parents=True, exist_ok=True)
                 if plat.is_windows():
@@ -340,10 +341,18 @@ def run_gui():
                     subprocess.Popen(["xdg-open", str(d)])
                 else:
                     subprocess.Popen(["open", str(d)])
-                log(f"Папка бэкингов: {d}")
+                log(f"{label}: {d}")
             except Exception as e:  # noqa: BLE001
-                log(f"Папка бэкингов: {d} (открыть не удалось: {e})")
-        ttk.Button(card3, text="📁 Открыть папку песен", command=open_dodo_dir).pack(anchor="w", pady=(8, 0))
+                log(f"{label}: {d} (открыть не удалось: {e})")
+
+        dodo_btns = ttk.Frame(card3)
+        dodo_btns.pack(anchor="w", pady=(8, 0))
+        ttk.Button(dodo_btns, text="📁 Открыть папку песен",
+                   command=lambda: open_folder(plat.repo_root() / "server" / "render" / "nopus-opus" / "songs",
+                                                "Папка бэкингов")).pack(side="left")
+        ttk.Button(dodo_btns, text="📁 Открыть папку runtime (для ffmpeg)",
+                   command=lambda: open_folder(plat.repo_root() / "runtime",
+                                                "Папка runtime")).pack(side="left", padx=(6, 0))
 
         # Громкость рендера (инструмент / бэкинг) — ползунки.
         vol = ttk.Frame(card3, style="Card.TFrame")

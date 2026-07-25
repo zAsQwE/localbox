@@ -15,8 +15,13 @@ LocalBox собирает этот mp3 **локально** через `ffmpeg`:
 
 ## Требования
 
-- **ffmpeg** в `PATH` (`ffmpeg -version`). Без него рендер не работает.
+- **ffmpeg** — либо в `PATH` (`ffmpeg -version`), либо просто положи бинарник в `runtime/` в корне
+  проекта (`runtime/ffmpeg.exe` на Windows, `runtime/ffmpeg` на Linux/macOS) — движок сначала
+  проверяет туда, и только потом PATH. Полезно, если системная установка (напр. через winget)
+  не подхватывается по PATH — так надёжнее. Без ffmpeg рендер не работает.
   - Arch/CachyOS: `sudo pacman -S ffmpeg` · Debian/Ubuntu: `sudo apt install ffmpeg`
+  - Windows: скачай сборку с https://www.gyan.dev/ffmpeg/builds/ (ffmpeg-release-essentials),
+    из архива `bin/ffmpeg.exe` положи в `runtime/ffmpeg.exe`.
 - Node.js (как для всего движка).
 - Интернет **один раз** — недостающие сэмплы инструментов докачиваются с
   `cdn.jackboxgames.com` и кэшируются локально (дальше офлайн).
@@ -105,7 +110,7 @@ LOCALBOX_DEBUG=1 python3 -u localbox_launcher.py -ip=АЙПИ 2>&1 | tee ~/local
 
 | Симптом                                   | Причина / решение                                                  |
 | ----------------------------------------- | ------------------------------------------------------------------ |
-| `[render] нет ffmpeg`                      | Поставь ffmpeg.                                                    |
+| `[render] нет ffmpeg`                      | Поставь ffmpeg (в PATH) или положи бинарник в `runtime/` — см. «Требования» выше. |
 | Висит на «Waiting while performance processes», нет `[render] готово` | Рендер упал — смотри строку ошибки ffmpeg в логе. |
 | Есть `[render] готово`, но нет `GET /render` | Хост не докачивает — проверь, что серверный серт доверен на машине хоста (иначе `<audio>` не грузит). |
 | Инструментов почти не слышно              | Подними `LOCALBOX_RENDER_INSTR`, опусти `LOCALBOX_RENDER_BACKING`. |

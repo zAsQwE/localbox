@@ -39,22 +39,9 @@ function nameToMidi(name) {
     return i + (parseInt(mt[2], 10) + 1) * 12;
 }
 
-// Кросс-платформенная проверка «команда есть в PATH». Раньше искали через "sh -lc command -v" —
-// на Windows нет sh, всегда давало «нет», даже если ffmpeg реально стоит (напр. через winget).
-// На Windows используем "where" (то же самое, чем его находит start-server.bat — проверенно
-// работает); на прочих платформах запускаем саму команду напрямую (без шелла).
-function has(cmd) {
-    const cp = require("child_process");
-    try {
-        if (process.platform === "win32") cp.execFileSync("where", [cmd], { stdio: "ignore" });
-        else cp.execFileSync(cmd, ["-version"], { stdio: "ignore" });
-        return true;
-    } catch (e) {
-        if (process.platform === "win32") return false; // where ничего не нашёл
-        return !!(e && e.code && e.code !== "ENOENT"); // запустился, но упал (напр. неизв. флаг) — команда есть
-    }
-}
-const FFMPEG = has("ffmpeg");
+// FFMPEG — путь к бинарнику (свой в runtime/, иначе из PATH) или null, если нигде не нашли.
+// См. server/lib/ffmpeg.js — сначала свой портативный ffmpeg (runtime/ffmpeg[.exe]), потом PATH.
+const { FFMPEG, SOURCE: FFMPEG_SOURCE } = require("./ffmpeg.js");
 
 // ---- сэмплы ----
 
@@ -293,7 +280,7 @@ async function synth(payload, id) {
 
     return new Promise((resolve) => {
         console.log(`[render] ffmpeg: ${usable.length} нот${backing ? " + бэкинг" : ""} → ${id}.mp3`);
-        execFile("ffmpeg", args, { maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
+        execFile(FFMPEG, args, { maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
             if (err || !fs.existsSync(out) || fs.statSync(out).size < 200) {
                 const tail = (stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message)) || "?";
                 console.log("[render] ffmpeg не собрал mp3: " + tail);
@@ -331,10 +318,11 @@ function logStatus(log) {
     if (!r.enabled) return;
     log("[dodo] Додо Ре Ми: поддержка ВКЛючена.");
     if (!r.ffmpeg) {
-        log("[dodo] ⚠ ffmpeg НЕ найден — рендер выступления невозможен. Поставь ffmpeg (в PATH) и перезапусти.");
+        log("[dodo] ⚠ ffmpeg НЕ найден — рендер выступления невозможен. Либо поставь ffmpeg в систему (в PATH),");
+        log("[dodo]   либо просто положи ffmpeg" + (process.platform === "win32" ? ".exe" : "") + " в папку " + require("./ffmpeg.js").RUNTIME_DIR + " и перезапусти сервер.");
         return;
     }
-    log("[dodo] ffmpeg: ок · бэкингов песен найдено: " + r.backings + " (инструменты докачаются сами).");
+    log("[dodo] ffmpeg: ок (" + FFMPEG_SOURCE + ") · бэкингов песен найдено: " + r.backings + " (инструменты докачаются сами).");
     if (r.backings === 0) {
         log("[dodo] ⚠ Нет бэкингов песен — выступление соберётся БЕЗ музыки (только ноты игрока + промахи).");
         log("[dodo]   Чтобы была музыка, положи бэкинг каждой песни сюда:");
@@ -355,7 +343,7 @@ function handleExternalRequest(client, room, msg) {
         if (!warnedOff) { console.log("[dodo] пришёл запрос рендера, но поддержка Додо Ре Ми ВЫКЛючена — пропускаю. Включи её в настройках лаунчера или запусти сервер «с поддержкой Додо Ре Ми» (start-server.bat)."); warnedOff = true; }
         return;
     }
-    if (!FFMPEG) { console.log("[dodo] ⚠ нет ffmpeg — рендер невозможен. Поставь ffmpeg (в PATH)."); return; }
+    if (!FFMPEG) { console.log("[dodo] ⚠ нет ffmpeg — рендер невозможен. Поставь ffmpeg (в PATH) или положи в " + require("./ffmpeg.js").RUNTIME_DIR + "."); return; }
 
     console.log("[render] запрос: key=" + key + " service=" + (p.service || "?") + " acl=" + JSON.stringify(p.acl || null));
 

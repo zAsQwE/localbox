@@ -1,0 +1,47 @@
+"use strict";
+//
+// LocalBox — поиск ffmpeg. Раньше искали ТОЛЬКО в PATH системы, что на Windows оказалось хрупко
+// (winget иногда ставит его так, что PATH-детект не срабатывает). Теперь сначала смотрим свой
+// портативный бинарник в repo-root/runtime/ (тот же каталог, куда можно положить портативный
+// node — см. launcher/setup/engine.py find_node()), и только потом — PATH.
+//
+// Кладётся руками: скачай ffmpeg (https://ffmpeg.org/download.html, для Windows — сборка с
+// gyan.dev/ffmpeg/builds), возьми ffmpeg.exe (Windows) / ffmpeg (Linux/macOS) из bin/ архива и
+// положи в runtime/ffmpeg.exe (или runtime/ffmpeg) в корне проекта.
+//
+
+const fs = require("fs");
+const path = require("path");
+const cp = require("child_process");
+
+const REPO_ROOT = path.join(__dirname, "..", "..");
+const RUNTIME_DIR = path.join(REPO_ROOT, "runtime");
+const EXE = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+
+function bundledPath() {
+    for (const p of [path.join(RUNTIME_DIR, EXE), path.join(RUNTIME_DIR, "bin", EXE)]) {
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
+
+// Проверка "ffmpeg есть в PATH системы" — на Windows через where (то же самое, чем его находит
+// start-server.bat), иначе прямым запуском (без шелла — на Windows нет sh).
+function foundOnPath() {
+    try {
+        if (process.platform === "win32") cp.execFileSync("where", ["ffmpeg"], { stdio: "ignore" });
+        else cp.execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+        return true;
+    } catch (e) {
+        if (process.platform === "win32") return false; // where ничего не нашёл
+        return !!(e && e.code && e.code !== "ENOENT"); // запустился, но упал — команда есть
+    }
+}
+
+const bundled = bundledPath();
+// FFMPEG — что передавать в execFile/execFileSync как имя команды: путь к своему бинарнику,
+// просто "ffmpeg" (если он в PATH), либо null (нигде не нашли).
+const FFMPEG = bundled || (foundOnPath() ? "ffmpeg" : null);
+const SOURCE = bundled ? "свой (" + bundled + ")" : (FFMPEG ? "системный (PATH)" : null);
+
+module.exports = { FFMPEG, SOURCE, RUNTIME_DIR };

@@ -27,7 +27,8 @@ function has(cmd) {
     }
 }
 const ESPEAK = has("espeak-ng") ? "espeak-ng" : (has("espeak") ? "espeak" : null);
-const FFMPEG = has("ffmpeg");
+// FFMPEG — путь к бинарнику (свой в runtime/, иначе из PATH) или null. См. server/lib/ffmpeg.js.
+const FFMPEG = require("./ffmpeg.js").FFMPEG;
 
 const ENGINE = (process.env.LOCALBOX_TTS_ENGINE || "auto").toLowerCase();
 const VOICE = process.env.LOCALBOX_TTS_VOICE || "eugene";
@@ -139,7 +140,7 @@ async function toAudio(id) {
     if (FFMPEG) {
         const mp3 = path.join(DIR, id + ".mp3");
         // громче + выровнять громкость (Silero/espeak часто тихие). loudnorm с запасом.
-        await run("ffmpeg", ["-y", "-i", wav, "-af", "loudnorm=I=-11:TP=-1.5:LRA=11,volume=1.5", mp3]);
+        await run(FFMPEG, ["-y", "-i", wav, "-af", "loudnorm=I=-11:TP=-1.5:LRA=11,volume=1.5", mp3]);
         if (fs.existsSync(mp3)) { try { fs.unlinkSync(wav); } catch { /* ignore */ } return id + ".mp3"; }
     }
     return id + ".wav";
@@ -158,7 +159,7 @@ async function silence(id, text) {
     const dur = Math.min(Math.max(String(text || "").length * 0.07, 1), 12);
     if (FFMPEG) {
         const mp3 = path.join(DIR, id + ".mp3");
-        await run("ffmpeg", ["-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", dur.toFixed(1), mp3]);
+        await run(FFMPEG, ["-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", dur.toFixed(1), mp3]);
         if (fs.existsSync(mp3)) return id + ".mp3";
     }
     const sr = 8000, n = Math.floor(sr * 0.5), data = Buffer.alloc(n * 2), b = Buffer.alloc(44 + data.length);
