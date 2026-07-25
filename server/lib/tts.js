@@ -43,6 +43,14 @@ console.log("[tts] движок:", ENGINE, "| голос:", VOICE, "| espeak:", 
 
 function run(cmd, args) { return new Promise((res) => execFile(cmd, args, () => res())); }
 
+// Python на Windows по умолчанию открывает stdin/stdout в кодировке консоли/системной локали,
+// НЕ в UTF-8 (в отличие от Linux, где локаль обычно и так UTF-8). Мы пишем кириллический текст
+// в stdin процессов Piper/Silero как UTF-8 — без этих переменных Python на Windows декодирует его
+// неверно (текст превращается в мусор/пусто), из-за чего Piper синтезирует НОЛЬ аудио-чанков и
+// падает с непонятной "wave.Error: # channels not specified" (сам файл при этом даже не открыт
+// с нужными параметрами). PYTHONUTF8=1 включает Python UTF-8 mode целиком (PEP 540).
+const PY_ENV = Object.assign({}, process.env, { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" });
+
 // ---- Piper (piper1-gpl): быстрый нейро-TTS; голос-модель качается один раз в tts/piper/ ----
 // Piper НЕ докачивает голос сам — сначала piper.download_voices, потом синтез.
 // Голос — ДВА файла (.onnx + .onnx.json с конфигом sample rate/каналов и т.п.) — если скачивание
@@ -57,7 +65,7 @@ function piperEnsure(voice) {
         if (piperVoiceReady(voice)) return resolve(true);
         console.log("[tts] Piper: скачиваю голос " + voice + " (один раз)…");
         let p;
-        try { p = spawn(PYTHON, ["-m", "piper.download_voices", voice, "--data-dir", PIPER_DIR], { env: process.env }); }
+        try { p = spawn(PYTHON, ["-m", "piper.download_voices", voice, "--data-dir", PIPER_DIR], { env: PY_ENV }); }
         catch { return resolve(false); }
         let err = "";
         p.stderr.on("data", (d) => { err += d.toString(); });
@@ -74,7 +82,7 @@ async function piperSynth(text, voice, out) {
     if (!(await piperEnsure(voice))) return false;
     return new Promise((resolve) => {
         let p;
-        try { p = spawn(PYTHON, ["-m", "piper", "-m", voice, "--data-dir", PIPER_DIR, "-f", out], { env: process.env }); }
+        try { p = spawn(PYTHON, ["-m", "piper", "-m", voice, "--data-dir", PIPER_DIR, "-f", out], { env: PY_ENV }); }
         catch (e) { console.log("[tts] Piper: не запустить (" + e.message + ")"); return resolve(false); }
         let err = "";
         p.stderr.on("data", (d) => { err += d.toString(); });
@@ -98,7 +106,7 @@ function makeWorker(scriptRel, label) {
         if (ready) return ready;
         ready = new Promise((resolve) => {
             let p;
-            try { p = spawn(PYTHON, [path.join(__dirname, "..", "tts", scriptRel)], { env: process.env }); }
+            try { p = spawn(PYTHON, [path.join(__dirname, "..", "tts", scriptRel)], { env: PY_ENV }); }
             catch (e) { console.log("[tts] " + label + ": не запустить python (" + e.message + ")"); return resolve(false); }
             let buf = "";
             const to = setTimeout(() => { console.log("[tts] " + label + ": таймаут загрузки модели"); resolve(false); }, 600000);

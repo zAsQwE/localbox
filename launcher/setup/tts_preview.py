@@ -26,6 +26,19 @@ def _py():
     return p or sys.executable or "python3"
 
 
+def _py_env(extra: dict | None = None) -> dict:
+    """Окружение для python-сабпроцессов TTS. На Windows Python по умолчанию открывает
+    stdin/stdout в кодировке консоли/локали, НЕ в UTF-8 (Linux обычно и так UTF-8) — при передаче
+    кириллического текста это ломает синтез (Piper падает с "wave.Error: # channels not specified",
+    т.к. распознаёт мусор/пустоту вместо текста и не выдаёт ни одного аудио-чанка)."""
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    if extra:
+        env.update(extra)
+    return env
+
+
 def _espeak_voice(voice: str) -> str:
     v = (voice or "").lower()
     if any(x in v for x in ("baya", "kseniya", "xenia", "fem", "жен")):
@@ -63,8 +76,7 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
         if eng == "silero" and worker.exists():
             try:
                 log("Генерирую образец (Silero — первый раз качается модель ~60МБ, подождите)…")
-                env = dict(os.environ)
-                env["LOCALBOX_TTS_VOICE"] = voice
+                env = _py_env({"LOCALBOX_TTS_VOICE": voice})
                 r = subprocess.run([py, str(worker), "--sample", voice, out],
                                    capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=600)
                 if sized():
@@ -83,10 +95,11 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
                 if not ((piper_dir / (v + ".onnx")).exists() and (piper_dir / (v + ".onnx.json")).exists()):
                     log(f"Скачиваю голос Piper {v} (один раз, нужен интернет)…")
                     subprocess.run([py, "-m", "piper.download_voices", v, "--data-dir", str(piper_dir)],
-                                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+                                   capture_output=True, text=True, encoding="utf-8", errors="replace", env=_py_env(), timeout=600)
                 log(f"Генерирую образец (Piper, {v})…")
                 r = subprocess.run([py, "-m", "piper", "-m", v, "--data-dir", str(piper_dir), "-f", out],
-                                   input=SAMPLE_TEXT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+                                   input=SAMPLE_TEXT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                   env=_py_env(), timeout=600)
                 if sized():
                     return _boost(out, log)
                 if engine == "piper":
