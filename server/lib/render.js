@@ -39,7 +39,17 @@ function nameToMidi(name) {
     return i + (parseInt(mt[2], 10) + 1) * 12;
 }
 
-function has(cmd) { try { require("child_process").execFileSync("sh", ["-lc", "command -v " + cmd], { stdio: "ignore" }); return true; } catch { return false; } }
+// Кросс-платформенная проверка «команда есть в PATH»: пробуем реально её запустить, а не искать
+// через sh (на Windows нет sh — старая проверка "sh -lc command -v" всегда давала «нет», даже
+// если ffmpeg реально стоит, напр. через winget).
+function has(cmd) {
+    try {
+        require("child_process").execFileSync(cmd, ["-version"], { stdio: "ignore" });
+        return true;
+    } catch (e) {
+        return !!(e && e.code && e.code !== "ENOENT"); // запустился, но упал (напр. неизв. флаг) — команда есть
+    }
+}
 const FFMPEG = has("ffmpeg");
 
 // ---- сэмплы ----

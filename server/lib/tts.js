@@ -15,7 +15,15 @@ const { execFile, execFileSync, spawn } = require("child_process");
 const u = require("./util.js");
 
 const DIR = path.join(__dirname, "..", "storage", "tts");
-function has(cmd) { try { execFileSync("sh", ["-lc", "command -v " + cmd], { stdio: "ignore" }); return true; } catch { return false; } }
+// Кросс-платформенная проверка «команда есть в PATH» (см. пояснение в render.js — sh нет на Windows).
+function has(cmd) {
+    try {
+        execFileSync(cmd, ["-version"], { stdio: "ignore" });
+        return true;
+    } catch (e) {
+        return !!(e && e.code && e.code !== "ENOENT");
+    }
+}
 const ESPEAK = has("espeak-ng") ? "espeak-ng" : (has("espeak") ? "espeak" : null);
 const FFMPEG = has("ffmpeg");
 
