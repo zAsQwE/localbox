@@ -70,7 +70,7 @@ if defined HAVEBACK (
   echo       Сэмплы инструментов докачаются сами при первом рендере.
 )
 echo.
-echo   ^(<slug^> — папка песни, напр. trivia-murder-party-2^)
+echo   ^(^<slug^> — папка песни, напр. trivia-murder-party-2^)
 echo.
 echo Нажми Enter, чтобы запустить с Додо Ре Ми ^(или закрой окно, чтобы отменить^)...
 pause >nul

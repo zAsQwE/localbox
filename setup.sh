@@ -7,7 +7,7 @@
 #   ./setup.sh --run    — после установки сразу запустить (GUI, или сервер если нет дисплея)
 #
 # Пытается доставить недостающее САМ через пакетный менеджер (apt/pacman/dnf/zypper/brew).
-# Node.js/Python/ffmpeg ставятся автоматически (с sudo, где нужно). На Windows — install.bat.
+# Node.js/Python/tkinter/ffmpeg ставятся автоматически (с sudo, где нужно). На Windows — install.bat.
 #
 set -u
 cd "$(cd "$(dirname "$0")" && pwd)"   # корень проекта
@@ -71,6 +71,19 @@ else
     warn "Python 3 не найден — устанавливаю…"
     pkg_install python3 python python3 python3 python
     command -v python3 >/dev/null 2>&1 && ok "$(python3 --version 2>&1)" || warn "поставьте python3 вручную (нужен для лаунчера)"
+fi
+
+# 2b) tkinter (GUI лаунчера) — на Arch/Debian/Fedora это ОТДЕЛЬНЫЙ пакет, не идёт с python3.
+#     Без него launcher/localbox_launcher.py молча падает в headless-режим (окно не открывается,
+#     кажется что "ничего не происходит") — ставим сразу, чтобы GUI точно работал.
+say "tkinter (GUI лаунчера)"
+if python3 -c "import tkinter" >/dev/null 2>&1; then
+    ok "есть"
+else
+    warn "нет — ставлю (иначе окно лаунчера не откроется, будет только консольный режим)…"
+    pkg_install python3-tk tk python3-tkinter python3-tk python-tk
+    python3 -c "import tkinter" >/dev/null 2>&1 && ok "поставлен" \
+        || warn "не удалось поставить автоматически — поставь вручную: Debian/Ubuntu 'sudo apt install python3-tk', Arch 'sudo pacman -S tk', Fedora 'sudo dnf install python3-tkinter', macOS 'brew install python-tk'."
 fi
 
 # 3) ffmpeg (TTS + рендер Додо Ре Ми)

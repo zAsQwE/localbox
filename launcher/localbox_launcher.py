@@ -28,8 +28,10 @@ def run_gui():
 
     root = tk.Tk()
     root.title("LocalBox")
-    root.geometry("680x560")
-    root.minsize(620, 520)
+    # Стартовый размер подгоняем под экран (маленькие ноутбуки/проекторы) — не больше доступного места.
+    sw0, sh0 = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{min(680, sw0 - 40)}x{min(560, sh0 - 80)}")
+    root.minsize(min(620, sw0 - 40), min(520, sh0 - 80))
 
     # --- стиль (тёмная палитра + аккуратные отступы) ---
     BG, CARD, FG, MUTED, ACC = "#15131f", "#221d33", "#f2f1f7", "#9c93b8", "#6a5bff"
@@ -191,10 +193,66 @@ def run_gui():
 
         outer = ttk.Frame(win, padding=18)
         outer.pack(fill="both", expand=True)
-        ttk.Label(outer, text="Настройки", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+        title_lbl = ttk.Label(outer, text="Настройки", style="Title.TLabel")
+        title_lbl.pack(anchor="w", pady=(0, 10))
+
+        # Кнопки паркуем СНИЗУ и упаковываем РАНЬШЕ прокручиваемой области — тогда их место
+        # всегда зарезервировано (не съедается контентом), и «Сохранить» не может пропасть
+        # с экрана, даже если настроек слишком много для маленького/маленького-разрешения экрана.
+        bar = ttk.Frame(outer)
+        bar.pack(fill="x", side="bottom", pady=(12, 0))
+        ttk.Button(bar, text="Сохранить", style="Accent.TButton", command=lambda: save_close()).pack(side="right")
+        ttk.Button(bar, text="Отмена", command=lambda: win.destroy()).pack(side="right", padx=8)
+
+        # Прокручиваемая область под настройки — если контент не помещается по высоте, появится
+        # скролл (колесо мыши/трекпад), а не обрезанные/невидимые виджеты.
+        scroll_holder = ttk.Frame(outer)
+        scroll_holder.pack(fill="both", expand=True)
+        canvas = tk.Canvas(scroll_holder, bg=BG, highlightthickness=0, bd=0)
+        vsb = ttk.Scrollbar(scroll_holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        cols = ttk.Frame(canvas)
+        cols_win = canvas.create_window((0, 0), window=cols, anchor="nw")
+
+        def _on_cols_configure(_e=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # показываем скроллбар, только если контент реально не влезает
+            need = cols.winfo_reqheight() > canvas.winfo_height()
+            if need and not vsb.winfo_ismapped():
+                vsb.pack(side="right", fill="y")
+            elif not need and vsb.winfo_ismapped():
+                vsb.pack_forget()
+        cols.bind("<Configure>", _on_cols_configure)
+
+        def _on_canvas_configure(e):
+            canvas.itemconfigure(cols_win, width=e.width)
+            _on_cols_configure()
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_wheel(e):
+            if not vsb.winfo_ismapped():
+                return
+            delta = -1 if e.delta > 0 else 1
+            if getattr(e, "num", None) == 4:
+                delta = -1
+            elif getattr(e, "num", None) == 5:
+                delta = 1
+            canvas.yview_scroll(delta, "units")
+        # Колесо мыши работает, только пока курсор над областью настроек (bind_all — временно,
+        # локально к этому окну), чтобы не перехватывать скролл над остальным приложением.
+        WHEEL_SEQS = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+        def _wheel_on(_e=None):
+            for seq in WHEEL_SEQS:
+                canvas.bind_all(seq, _on_wheel)
+        def _wheel_off(_e=None):
+            for seq in WHEEL_SEQS:
+                canvas.unbind_all(seq)
+        canvas.bind("<Enter>", _wheel_on)
+        canvas.bind("<Leave>", _wheel_off)
+        win.bind("<Destroy>", lambda e: _wheel_off() if e.widget is win else None)
+
         # Две колонки: слева сеть+озвучка, справа Додо Ре Ми+админ-читы.
-        cols = ttk.Frame(outer)
-        cols.pack(fill="both", expand=True)
         left = ttk.Frame(cols)
         left.pack(side="left", fill="both", expand=True, padx=(0, 7))
         right = ttk.Frame(cols)
@@ -333,18 +391,20 @@ def run_gui():
                 "Применятся при следующем запуске сервера.")
             win.destroy()
 
-        bar = ttk.Frame(outer)
-        bar.pack(fill="x", side="bottom", pady=(16, 0))
-        ttk.Button(bar, text="Сохранить", style="Accent.TButton", command=save_close).pack(side="right")
-        ttk.Button(bar, text="Отмена", command=win.destroy).pack(side="right", padx=8)
-
-        # Подгоняем окно под содержимое (две колонки) — чтобы всё влезало без ручного растягивания.
+        # Подгоняем окно под экран: по ширине — под содержимое (не больше экрана), по высоте —
+        # тоже под содержимое, но НЕ ВЫШЕ экрана — если контент выше, он попадёт в скролл (см.
+        # выше), а не обрежет кнопки «Сохранить»/«Отмена» (те в отдельном pack-блоке снизу, их
+        # место зарезервировано всегда).
         win.update_idletasks()
-        rw, rh = outer.winfo_reqwidth() + 8, outer.winfo_reqheight() + 8
+        rw = cols.winfo_reqwidth() + 8
+        # Canvas не пробрасывает высоту содержимого в свой reqheight (оно внутри прокрутки),
+        # поэтому считаем нужную высоту вручную по реальным виджетам, а не outer.winfo_reqheight().
+        rh = title_lbl.winfo_reqheight() + bar.winfo_reqheight() + cols.winfo_reqheight() + 90
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        w, h = min(max(rw, 740), sw - 60), min(rh, sh - 100)
+        w = min(max(rw, 740), sw - 60)
+        h = min(max(rh, 420), sh - 80)
         win.geometry(f"{w}x{h}")
-        win.minsize(min(w, 700), min(h, 420))
+        win.minsize(min(w, 700), min(h, 360))
 
     cert_btn.configure(command=on_cert)
     ports_btn.configure(command=on_ports)
