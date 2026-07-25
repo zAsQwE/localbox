@@ -254,4 +254,12 @@ sudo pkill -9 -f server/server.js; sudo fuser -k -9 38203/tcp
 
 ---
 
+## Озвучка (TTS)
+
+Игры вроде Mad Verse City требуют голосовой синтез — движок озвучивает локально/офлайн
+(Silero/Piper/espeak, на выбор в настройках лаунчера). Установка под Windows и Linux,
+частые ошибки (в т.ч. `onnxruntime`/DLL на Windows) — в [docs/tts.md](docs/tts.md).
+
+---
+
 Я **не** связан с Jackbox Games. Все права на оригинальные сервисы, название и бренд Jackbox принадлежат Jackbox Games. Перевод — сообщества (jackbox.ru / What If?).
