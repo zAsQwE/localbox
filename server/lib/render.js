@@ -277,24 +277,40 @@ async function synth(payload, id) {
         return { inputs, filters };
     }
 
+    // execFile на Windows в редких случаях (замечено на реальном железе — "spawn UNKNOWN") бросает
+    // исключение СИНХРОННО, а не через колбэк с err — без try/catch это рушит весь Promise.all
+    // необработанным отказом (падал ВЕСЬ рендер из-за одного упавшего батча). Заворачиваем.
     function runFfmpeg(args, cwd) {
         return new Promise((resolve) => {
-            execFile(FFMPEG, args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
-                resolve({ ok: !err, tail: stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message) });
-            });
+            try {
+                execFile(FFMPEG, args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
+                    resolve({ ok: !err, tail: stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message) });
+                });
+            } catch (e) {
+                resolve({ ok: false, tail: "spawn исключение: " + (e && e.message) });
+            }
         });
     }
 
-    // Батчи мешаем ПАРАЛЛЕЛЬНО (каждый — свой временный wav) — так суммарное время рендера
-    // остаётся примерно таким же, как раньше одним проходом.
+    // Батчи мешаем НЕБОЛЬШИМИ группами параллельно (не все разом) — большое число одновременных
+    // дочерних процессов на Windows иногда провоцирует те же спонтанные "spawn UNKNOWN". Группа из
+    // нескольких штук почти не теряет во времени против полностью параллельного запуска.
+    fs.mkdirSync(INSTR_DIR, { recursive: true });
+    const CONCURRENCY = 3;
     const batches = [];
     for (let start = 0; start < usable.length; start += BATCH) batches.push(usable.slice(start, start + BATCH));
     const batchFiles = batches.map((_, i) => path.join(OUT_DIR, id + ".batch" + i + ".wav"));
-    const batchResults = await Promise.all(batches.map((chunk, i) => {
-        const { inputs, filters } = noteArgs(chunk);
-        const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
-        return runFfmpeg(args, INSTR_DIR);
-    }));
+    const batchResults = new Array(batches.length);
+    for (let g = 0; g < batches.length; g += CONCURRENCY) {
+        const group = batches.slice(g, g + CONCURRENCY);
+        const results = await Promise.all(group.map((chunk, j) => {
+            const i = g + j;
+            const { inputs, filters } = noteArgs(chunk);
+            const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
+            return runFfmpeg(args, INSTR_DIR);
+        }));
+        results.forEach((r, j) => { batchResults[g + j] = r; });
+    }
     const okBatchFiles = batchFiles.filter((f, i) => batchResults[i].ok && fs.existsSync(f));
     const cleanupBatches = () => okBatchFiles.forEach((f) => { try { fs.unlinkSync(f); } catch { /* ignore */ } });
     if (!okBatchFiles.length) {
