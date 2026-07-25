@@ -45,10 +45,16 @@ function run(cmd, args) { return new Promise((res) => execFile(cmd, args, () => 
 
 // ---- Piper (piper1-gpl): быстрый нейро-TTS; голос-модель качается один раз в tts/piper/ ----
 // Piper НЕ докачивает голос сам — сначала piper.download_voices, потом синтез.
+// Голос — ДВА файла (.onnx + .onnx.json с конфигом sample rate/каналов и т.п.) — если скачивание
+// прервалось (сеть моргнула, сон устройства) и остался только .onnx без .onnx.json, Piper падает
+// на синтезе с непонятной внутренней ошибкой (напр. "wave.Error: # channels not specified"),
+// а наша проверка "уже скачано" раньше смотрела только на .onnx и не замечала неполную загрузку.
+function piperVoiceReady(voice) {
+    return fs.existsSync(path.join(PIPER_DIR, voice + ".onnx")) && fs.existsSync(path.join(PIPER_DIR, voice + ".onnx.json"));
+}
 function piperEnsure(voice) {
     return new Promise((resolve) => {
-        const onnx = path.join(PIPER_DIR, voice + ".onnx");
-        if (fs.existsSync(onnx)) return resolve(true);
+        if (piperVoiceReady(voice)) return resolve(true);
         console.log("[tts] Piper: скачиваю голос " + voice + " (один раз)…");
         let p;
         try { p = spawn(PYTHON, ["-m", "piper.download_voices", voice, "--data-dir", PIPER_DIR], { env: process.env }); }
@@ -57,8 +63,8 @@ function piperEnsure(voice) {
         p.stderr.on("data", (d) => { err += d.toString(); });
         p.on("error", () => resolve(false));
         p.on("exit", () => {
-            const ok = fs.existsSync(onnx);
-            if (!ok && err) console.log("[tts] Piper: не скачался голос: " + err.trim().split("\n").pop().slice(0, 200));
+            const ok = piperVoiceReady(voice);
+            if (!ok && err) console.log("[tts] Piper: не скачался голос (нет .onnx/.onnx.json): " + err.trim().split("\n").pop().slice(0, 200));
             resolve(ok);
         });
     });

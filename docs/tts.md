@@ -136,6 +136,7 @@ sudo dnf install espeak-ng
 | `No module named 'torch'` / `'onnxruntime'` / `'piper'`                     | Пакет не установлен в ТОМ python, который использует сервер — проверь поле «Python для TTS». |
 | Silero: `не установлен torch/numpy`                                         | `pip install torch numpy` (в правильный python — см. выше).                          |
 | Piper: `нужен pip install piper-tts`                                        | `pip install piper-tts`; на Windows отдельно поставь VC++ Redistributable.          |
+| Piper: `wave.Error: # channels not specified`                               | Голос скачался НЕПОЛНОСТЬЮ (нужны ДВА файла — `<голос>.onnx` и `<голос>.onnx.json`, а есть только первый — обычно из-за обрыва сети/сна устройства при скачивании). Удали папку `server/tts/piper/` и попробуй ещё раз — движок перекачает голос заново. |
 | `espeak: command not found` / `ESPEAK: нет`                                 | Поставь `espeak-ng` — на Windows инсталлятором, на Linux пакетным менеджером (см. выше). |
 | Голос есть, но игра всё равно молчит                                       | Проверь лог сервера при старте — строка `[tts] движок: ... espeak: ... ffmpeg: ...` показывает, что реально нашлось. |
 | Долго генерирует первый образец                                             | Нормально для Silero/Piper — скачивается модель (один раз, нужен интернет), дальше офлайн и быстро. |

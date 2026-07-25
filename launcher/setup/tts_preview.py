@@ -77,7 +77,10 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
             try:
                 v = voice if voice in settings.PIPER_VOICES else settings.PIPER_VOICES[0]
                 piper_dir.mkdir(parents=True, exist_ok=True)
-                if not (piper_dir / (v + ".onnx")).exists():
+                # Голос — ДВА файла (.onnx + .onnx.json); если скачивание прервалось и остался
+                # только .onnx без конфига, Piper падает при синтезе с непонятной ошибкой (напр.
+                # "wave.Error: # channels not specified") — поэтому проверяем оба файла, не один.
+                if not ((piper_dir / (v + ".onnx")).exists() and (piper_dir / (v + ".onnx.json")).exists()):
                     log(f"Скачиваю голос Piper {v} (один раз, нужен интернет)…")
                     subprocess.run([py, "-m", "piper.download_voices", v, "--data-dir", str(piper_dir)],
                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
