@@ -18,8 +18,10 @@ const REPO_ROOT = path.join(__dirname, "..", "..");
 const RUNTIME_DIR = path.join(REPO_ROOT, "runtime");
 const EXE = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
 
+const BUNDLED_CANDIDATES = [path.join(RUNTIME_DIR, EXE), path.join(RUNTIME_DIR, "bin", EXE)];
+
 function bundledPath() {
-    for (const p of [path.join(RUNTIME_DIR, EXE), path.join(RUNTIME_DIR, "bin", EXE)]) {
+    for (const p of BUNDLED_CANDIDATES) {
         if (fs.existsSync(p)) return p;
     }
     return null;
@@ -39,9 +41,25 @@ function foundOnPath() {
 }
 
 const bundled = bundledPath();
+const onPath = !bundled && foundOnPath(); // PATH проверяем, только если бандл не нашли (не нужно дважды)
 // FFMPEG — что передавать в execFile/execFileSync как имя команды: путь к своему бинарнику,
 // просто "ffmpeg" (если он в PATH), либо null (нигде не нашли).
-const FFMPEG = bundled || (foundOnPath() ? "ffmpeg" : null);
+const FFMPEG = bundled || (onPath ? "ffmpeg" : null);
 const SOURCE = bundled ? "свой (" + bundled + ")" : (FFMPEG ? "системный (PATH)" : null);
 
-module.exports = { FFMPEG, SOURCE, RUNTIME_DIR };
+// Подробный отчёт — печатаем при старте, чтобы при жалобе "не находит" не пришлось гадать:
+// видно, какие именно пути проверялись и что там реально есть на диске.
+function diagnose() {
+    const lines = [];
+    lines.push("[dodo] диагностика ffmpeg (server/lib/ffmpeg.js, платформа " + process.platform + "):");
+    lines.push("[dodo]   REPO_ROOT = " + REPO_ROOT);
+    for (const p of BUNDLED_CANDIDATES) {
+        lines.push("[dodo]   " + p + " — " + (fs.existsSync(p) ? "ЕСТЬ" : "нет"));
+    }
+    lines.push("[dodo]   поиск в PATH (" + (process.platform === "win32" ? "where ffmpeg" : "ffmpeg -version") + "): "
+        + (bundled ? "не проверялся (уже нашли свой)" : (onPath ? "найден" : "НЕ найден")));
+    lines.push("[dodo]   итог: " + (FFMPEG ? ("используется " + SOURCE + " → \"" + FFMPEG + "\"") : "ffmpeg НЕ найден нигде"));
+    return lines;
+}
+
+module.exports = { FFMPEG, SOURCE, RUNTIME_DIR, diagnose };

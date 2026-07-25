@@ -317,6 +317,7 @@ function logStatus(log) {
     const r = readiness();
     if (!r.enabled) return;
     log("[dodo] Додо Ре Ми: поддержка ВКЛючена.");
+    require("./ffmpeg.js").diagnose().forEach((line) => log(line)); // всегда — чтобы при жалобе "не находит" сразу было видно, где именно смотрели
     if (!r.ffmpeg) {
         log("[dodo] ⚠ ffmpeg НЕ найден — рендер выступления невозможен. Либо поставь ffmpeg в систему (в PATH),");
         log("[dodo]   либо просто положи ffmpeg" + (process.platform === "win32" ? ".exe" : "") + " в папку " + require("./ffmpeg.js").RUNTIME_DIR + " и перезапусти сервер.");
