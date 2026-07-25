@@ -150,15 +150,33 @@ class EngineProcess:
             self.on_log("node не найден. Установите Node.js (https://nodejs.org).")
             return False
         # Прибиваем зависший прошлый сервер и освобождаем его порты (переживают краши). best-effort.
-        for cmd in (
-            ["pkill", "-9", "-f", "server/server.js"],
-            ["fuser", "-k", "-9", "38202/tcp"],
-            ["fuser", "-k", "-9", "38203/tcp"],
-        ):
-            try:
-                subprocess.run(cmd, capture_output=True, timeout=5)
-            except Exception:  # noqa: BLE001
-                pass
+        # pkill/fuser — юниксовые утилиты, на Windows их нет (тихо ничего не делали бы) — там
+        # то же самое через PowerShell (по имени файла в командной строке / по владельцу порта).
+        if plat.is_windows():
+            ps_cmds = (
+                "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | "
+                "Where-Object { $_.CommandLine -like '*server.js*' } | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+                "Get-NetTCPConnection -LocalPort 38202 -ErrorAction SilentlyContinue | "
+                "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
+                "Get-NetTCPConnection -LocalPort 38203 -ErrorAction SilentlyContinue | "
+                "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
+            )
+            for ps in ps_cmds:
+                try:
+                    subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=8)
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            for cmd in (
+                ["pkill", "-9", "-f", "server/server.js"],
+                ["fuser", "-k", "-9", "38202/tcp"],
+                ["fuser", "-k", "-9", "38203/tcp"],
+            ):
+                try:
+                    subprocess.run(cmd, capture_output=True, timeout=5)
+                except Exception:  # noqa: BLE001
+                    pass
         env = os.environ.copy()
         env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
         # TTS: движок и голос из настроек + python для Silero-воркера (тот же, что у лаунчера).

@@ -39,14 +39,18 @@ function nameToMidi(name) {
     return i + (parseInt(mt[2], 10) + 1) * 12;
 }
 
-// Кросс-платформенная проверка «команда есть в PATH»: пробуем реально её запустить, а не искать
-// через sh (на Windows нет sh — старая проверка "sh -lc command -v" всегда давала «нет», даже
-// если ffmpeg реально стоит, напр. через winget).
+// Кросс-платформенная проверка «команда есть в PATH». Раньше искали через "sh -lc command -v" —
+// на Windows нет sh, всегда давало «нет», даже если ffmpeg реально стоит (напр. через winget).
+// На Windows используем "where" (то же самое, чем его находит start-server.bat — проверенно
+// работает); на прочих платформах запускаем саму команду напрямую (без шелла).
 function has(cmd) {
+    const cp = require("child_process");
     try {
-        require("child_process").execFileSync(cmd, ["-version"], { stdio: "ignore" });
+        if (process.platform === "win32") cp.execFileSync("where", [cmd], { stdio: "ignore" });
+        else cp.execFileSync(cmd, ["-version"], { stdio: "ignore" });
         return true;
     } catch (e) {
+        if (process.platform === "win32") return false; // where ничего не нашёл
         return !!(e && e.code && e.code !== "ENOENT"); // запустился, но упал (напр. неизв. флаг) — команда есть
     }
 }

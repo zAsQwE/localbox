@@ -18,9 +18,11 @@ const DIR = path.join(__dirname, "..", "storage", "tts");
 // Кросс-платформенная проверка «команда есть в PATH» (см. пояснение в render.js — sh нет на Windows).
 function has(cmd) {
     try {
-        execFileSync(cmd, ["-version"], { stdio: "ignore" });
+        if (process.platform === "win32") execFileSync("where", [cmd], { stdio: "ignore" });
+        else execFileSync(cmd, ["-version"], { stdio: "ignore" });
         return true;
     } catch (e) {
+        if (process.platform === "win32") return false;
         return !!(e && e.code && e.code !== "ENOENT");
     }
 }
