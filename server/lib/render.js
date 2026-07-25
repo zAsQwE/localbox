@@ -303,23 +303,22 @@ async function synth(payload, id) {
         });
     }
 
-    // Батчи мешаем небольшими группами параллельно (не все разом — если проблема была в числе
-    // одновременных процессов). НЕ используем cwd (см. выше) — сэмплы АБСОЛЮТНЫМИ путями, батчинг
-    // по 60 нот сам по себе держит команду далеко от лимита длины даже так.
-    const CONCURRENCY = 3;
+    // Батчи — СТРОГО ПО ОДНОМУ (не параллельно вообще). Ни ограничение до 3 одновременных, ни
+    // отказ от cwd, ни абсолютный путь к ffmpeg не убрали "spawn UNKNOWN" (errno -4094 = libuv
+    // UV_UNKNOWN — Windows вернул код ошибки, который Node вообще не смог классифицировать; это
+    // похоже на вмешательство антивируса/Защитника, реагирующего на частый повторный запуск
+    // одного и того же exe, а не на баг в наших аргументах). Одиночный запуск ffmpeg (без батчинга)
+    // у пользователя стабильно работал — поэтому по одному, с небольшой паузой между.
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const batches = [];
     for (let start = 0; start < usable.length; start += BATCH) batches.push(usable.slice(start, start + BATCH));
     const batchFiles = batches.map((_, i) => path.join(OUT_DIR, id + ".batch" + i + ".wav"));
-    const batchResults = new Array(batches.length);
-    for (let g = 0; g < batches.length; g += CONCURRENCY) {
-        const group = batches.slice(g, g + CONCURRENCY);
-        const results = await Promise.all(group.map((chunk, j) => {
-            const i = g + j;
-            const { inputs, filters } = noteArgs(chunk);
-            const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
-            return runFfmpeg(args);
-        }));
-        results.forEach((r, j) => { batchResults[g + j] = r; });
+    const batchResults = [];
+    for (let i = 0; i < batches.length; i++) {
+        const { inputs, filters } = noteArgs(batches[i]);
+        const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
+        batchResults.push(await runFfmpeg(args));
+        if (i < batches.length - 1) await sleep(60);
     }
     const okBatchFiles = batchFiles.filter((f, i) => batchResults[i].ok && fs.existsSync(f));
     const cleanupBatches = () => okBatchFiles.forEach((f) => { try { fs.unlinkSync(f); } catch { /* ignore */ } });
