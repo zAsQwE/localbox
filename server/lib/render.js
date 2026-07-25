@@ -236,71 +236,98 @@ async function synth(payload, id) {
     }
 
     // 4) ffmpeg: каждый сэмпл -> обрезка/сдвиг/громкость/задержка -> amix (+ бэкинг)
+    //
+    // БАТЧАМИ: на Windows у CreateProcess жёсткий лимит длины командной строки (~32К символов),
+    // а песня может иметь сотни нот — одной командой с сотнями -i и гигантским -filter_complex
+    // легко его превышаешь ("spawn ENAMETOOLONG"). -filter_complex_script (граф фильтров из файла,
+    // а не аргументом) решал бы это, но на практике оказался распознан не всеми сборками ffmpeg
+    // ("Unrecognized option") — поэтому вместо него режем ноты на некрупные батчи (короткая
+    // команда на каждый, гарантированно ниже любого лимита), мешаем их параллельно во временные
+    // wav, затем одной маленькой командой сводим все батчи (+ бэкинг) в финальный mp3.
     fs.mkdirSync(OUT_DIR, { recursive: true });
     const out = path.join(OUT_DIR, id + ".mp3");
-    const inputs = [];
-    const filters = [];
-    let idx = 0;
-    for (const e of usable) {
-        const durSec = Math.max(0.05, (e.durMs || 300) / 1000);
-        let f;
-        if (e.synth) {
-            // тон-генератор: sine нужной частоты, короткий fade-in (от щелчка) + fade-out (release)
-            inputs.push("-f", "lavfi", "-i", `sine=frequency=${e.freq.toFixed(2)}:duration=${durSec.toFixed(3)}:sample_rate=44100`);
-            const rel = Math.min(0.15, durSec * 0.5);
-            f = `[${idx}:a]afade=t=in:d=0.005,afade=t=out:st=${(durSec - rel).toFixed(3)}:d=${rel.toFixed(3)}` +
-                `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
-        } else {
-            // Путь ОТНОСИТЕЛЬНО INSTR_DIR (см. cwd в execFile ниже) — на Windows у CreateProcess
-            // жёсткий лимит длины командной строки (~32К символов), а песня может иметь сотни нот
-            // → сотни -i с абсолютными путями легко его превышают (spawn ENAMETOOLONG). Linux/macOS
-            // такого лимита практически не имеют, поэтому раньше это не всплывало в разработке.
-            inputs.push("-i", path.relative(INSTR_DIR, paths[e.slug + "|" + e.name]));
-            f = `[${idx}:a]atrim=0:${durSec.toFixed(3)}`;
-            if (e.shift) { const r = pow2(e.shift); f += `,asetrate=44100*${r.toFixed(5)},aresample=44100,${atempoChain(1 / r)}`; }
-            f += `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
-        }
-        filters.push(f);
-        idx++;
-    }
-    // Громкость: инструменты бустим (иначе почти не слышно на фоне бэкинга), бэкинг тише,
-    // финальный alimiter спасает от клиппинга. Настраивается через env.
     const INSTR_GAIN = parseFloat(process.env.LOCALBOX_RENDER_INSTR || "4") || 4;
     const BACK_VOL = parseFloat(process.env.LOCALBOX_RENDER_BACKING || "0.45") || 0.45;
-    let mixLabels = usable.map((_, i) => `[a${i}]`).join("");
-    let last = "[mix]";
-    filters.push(`${mixLabels}amix=inputs=${usable.length}:normalize=0:dropout_transition=0,volume=${INSTR_GAIN}[mix]`);
+    const BATCH = 60; // с большим запасом даже для длинных путей и всех фильтров одной ноты
+
+    function noteArgs(chunk) {
+        const inputs = [];
+        const filters = [];
+        chunk.forEach((e, idx) => {
+            const durSec = Math.max(0.05, (e.durMs || 300) / 1000);
+            let f;
+            if (e.synth) {
+                // тон-генератор: sine нужной частоты, короткий fade-in (от щелчка) + fade-out (release)
+                inputs.push("-f", "lavfi", "-i", `sine=frequency=${e.freq.toFixed(2)}:duration=${durSec.toFixed(3)}:sample_rate=44100`);
+                const rel = Math.min(0.15, durSec * 0.5);
+                f = `[${idx}:a]afade=t=in:d=0.005,afade=t=out:st=${(durSec - rel).toFixed(3)}:d=${rel.toFixed(3)}` +
+                    `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
+            } else {
+                // Путь ОТНОСИТЕЛЬНО INSTR_DIR (см. cwd в execFile ниже) — короче абсолютного, доп.
+                // запас по длине командной строки поверх самого батчинга.
+                inputs.push("-i", path.relative(INSTR_DIR, paths[e.slug + "|" + e.name]));
+                f = `[${idx}:a]atrim=0:${durSec.toFixed(3)}`;
+                if (e.shift) { const r = pow2(e.shift); f += `,asetrate=44100*${r.toFixed(5)},aresample=44100,${atempoChain(1 / r)}`; }
+                f += `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
+            }
+            filters.push(f);
+        });
+        const mixLabels = chunk.map((_, i) => `[a${i}]`).join("");
+        filters.push(`${mixLabels}amix=inputs=${chunk.length}:normalize=0:dropout_transition=0[out]`);
+        return { inputs, filters };
+    }
+
+    function runFfmpeg(args, cwd) {
+        return new Promise((resolve) => {
+            execFile(FFMPEG, args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
+                resolve({ ok: !err, tail: stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message) });
+            });
+        });
+    }
+
+    // Батчи мешаем ПАРАЛЛЕЛЬНО (каждый — свой временный wav) — так суммарное время рендера
+    // остаётся примерно таким же, как раньше одним проходом.
+    const batches = [];
+    for (let start = 0; start < usable.length; start += BATCH) batches.push(usable.slice(start, start + BATCH));
+    const batchFiles = batches.map((_, i) => path.join(OUT_DIR, id + ".batch" + i + ".wav"));
+    const batchResults = await Promise.all(batches.map((chunk, i) => {
+        const { inputs, filters } = noteArgs(chunk);
+        const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
+        return runFfmpeg(args, INSTR_DIR);
+    }));
+    const okBatchFiles = batchFiles.filter((f, i) => batchResults[i].ok && fs.existsSync(f));
+    const cleanupBatches = () => okBatchFiles.forEach((f) => { try { fs.unlinkSync(f); } catch { /* ignore */ } });
+    if (!okBatchFiles.length) {
+        console.log("[render] ни один батч ffmpeg не собрался: " + (batchResults.find((r) => !r.ok) || {}).tail);
+        return null;
+    }
+
+    // финальный микс: батчи (уже смикшированные ноты) + бэкинг — команда маленькая, инпутов немного.
+    const finalInputs = okBatchFiles.flatMap((f) => ["-i", f]);
+    const finalFilters = [];
+    let last;
+    const mixBatches = okBatchFiles.map((_, i) => `[${i}:a]`).join("");
     if (backing) {
-        inputs.push("-i", backing);
-        filters.push(`[${idx}:a]volume=${BACK_VOL}[bk]`);
-        filters.push(`[mix][bk]amix=inputs=2:normalize=0,alimiter=limit=0.95[out]`);
+        finalInputs.push("-i", backing);
+        finalFilters.push(`${mixBatches}amix=inputs=${okBatchFiles.length}:normalize=0:dropout_transition=0,volume=${INSTR_GAIN}[mix]`);
+        finalFilters.push(`[${okBatchFiles.length}:a]volume=${BACK_VOL}[bk]`);
+        finalFilters.push(`[mix][bk]amix=inputs=2:normalize=0,alimiter=limit=0.95[out]`);
         last = "[out]";
     } else {
-        filters.push(`[mix]alimiter=limit=0.95[out]`);
+        finalFilters.push(`${mixBatches}amix=inputs=${okBatchFiles.length}:normalize=0:dropout_transition=0,volume=${INSTR_GAIN},alimiter=limit=0.95[out]`);
         last = "[out]";
     }
-    // Граф фильтров — в отдельный файл (-filter_complex_script), а не аргументом командной строки:
-    // при сотнях нот сама строка фильтров легко тянет на десятки КБ, что вместе с -i выше упирается
-    // в тот же лимит длины командной строки на Windows.
-    const filterFile = path.join(OUT_DIR, id + ".filters.txt");
-    fs.writeFileSync(filterFile, filters.join(";"), "utf8");
-    const args = [...inputs, "-filter_complex_script", filterFile, "-map", last,
+    const finalArgs = [...finalInputs, "-filter_complex", finalFilters.join(";"), "-map", last,
         "-ac", "2", "-ar", "44100", "-b:a", "192k", "-y", out];
 
-    return new Promise((resolve) => {
-        console.log(`[render] ffmpeg: ${usable.length} нот${backing ? " + бэкинг" : ""} → ${id}.mp3`);
-        // cwd = INSTR_DIR: пути сэмплов выше относительные (см. пояснение про -i) — ffmpeg
-        // разрешает их отсюда; абсолютные (бэкинг/выход/файл фильтров) от cwd не зависят.
-        execFile(FFMPEG, args, { cwd: INSTR_DIR, maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            try { fs.unlinkSync(filterFile); } catch { /* ignore */ }
-            if (err || !fs.existsSync(out) || fs.statSync(out).size < 200) {
-                const tail = (stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message)) || "?";
-                console.log("[render] ffmpeg не собрал mp3: " + tail);
-                return resolve(null);
-            }
-            resolve(out);
-        });
-    });
+    console.log(`[render] ffmpeg: ${usable.length} нот (${okBatchFiles.length} батч.)${backing ? " + бэкинг" : ""} → ${id}.mp3`);
+    const finalRes = await runFfmpeg(finalArgs, undefined);
+    cleanupBatches();
+    if (!finalRes.ok || !fs.existsSync(out) || fs.statSync(out).size < 200) {
+        console.log("[render] ffmpeg не собрал mp3: " + finalRes.tail);
+        return null;
+    }
+    return out;
 }
 
 function dbToLin(db) { return Math.pow(10, db / 20); }
