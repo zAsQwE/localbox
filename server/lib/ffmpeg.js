@@ -49,11 +49,25 @@ function resolveOnPath() {
     }
 }
 
+// Приоритет выбора:
+//   1) системный ffmpeg из PATH, если его путь ЧИСТЫЙ (без не-ASCII/кириллицы) — берём его;
+//   2) иначе (путь с кириллицей ЛИБО в PATH не найден) — берём свой runtime/ffmpeg[.exe];
+//   3) если runtime-бинарника нет — откатываемся на PATH (пусть даже путь не-ASCII: на Windows
+//      запуск идёт через cmd.exe, см. render.js, что обходит проблему не-ASCII пути), либо null.
 const bundled = bundledPath();
-const onPathResolved = bundled ? null : resolveOnPath(); // PATH проверяем, только если бандла нет
-// FFMPEG — ВСЕГДА полный путь к бинарнику (свой в runtime/, либо резолвнутый из PATH), либо null.
-const FFMPEG = bundled || onPathResolved;
-const SOURCE = bundled ? "свой (" + bundled + ")" : (FFMPEG ? "системный (PATH, " + FFMPEG + ")" : null);
+const onPath = resolveOnPath();                                   // абсолютный путь из PATH или null
+const onPathAscii = onPath && !/[^\x00-\x7F]/.test(onPath);       // путь без кириллицы/не-ASCII?
+
+let FFMPEG, SOURCE;
+if (onPathAscii) {
+    FFMPEG = onPath; SOURCE = "системный (PATH, " + onPath + ")";
+} else if (bundled) {
+    FFMPEG = bundled; SOURCE = "свой (" + bundled + ")" + (onPath ? " — путь системного не-ASCII" : " — в PATH не найден");
+} else if (onPath) {
+    FFMPEG = onPath; SOURCE = "системный (PATH, не-ASCII путь → запуск через cmd, " + onPath + ")";
+} else {
+    FFMPEG = null; SOURCE = null;
+}
 
 // Подробный отчёт — печатаем при старте, чтобы при жалобе "не находит" не пришлось гадать:
 // видно, какие именно пути проверялись и что там реально есть на диске.
@@ -65,7 +79,7 @@ function diagnose() {
         lines.push("[dodo]   " + p + " — " + (fs.existsSync(p) ? "ЕСТЬ" : "нет"));
     }
     lines.push("[dodo]   поиск в PATH (" + (process.platform === "win32" ? "where ffmpeg" : "command -v ffmpeg") + "): "
-        + (bundled ? "не проверялся (уже нашли свой)" : (onPathResolved || "НЕ найден")));
+        + (onPath ? (onPath + (onPathAscii ? "" : " — не-ASCII путь!")) : "НЕ найден"));
     lines.push("[dodo]   итог: " + (FFMPEG ? ("используется " + SOURCE + " → \"" + FFMPEG + "\"") : "ffmpeg НЕ найден нигде"));
     return lines;
 }

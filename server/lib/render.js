@@ -248,7 +248,9 @@ async function synth(payload, id) {
     const out = path.join(OUT_DIR, id + ".mp3");
     const INSTR_GAIN = parseFloat(process.env.LOCALBOX_RENDER_INSTR || "4") || 4;
     const BACK_VOL = parseFloat(process.env.LOCALBOX_RENDER_BACKING || "0.45") || 0.45;
-    const BATCH = 60; // с большим запасом даже для длинных путей и всех фильтров одной ноты
+    // Windows идёт через cmd.exe (см. runFfmpeg) — там лимит длины строки ~8191, поэтому мельче.
+    // На Unix прямой спавн (лимит ~2 МБ) — можно крупнее.
+    const BATCH = process.platform === "win32" ? 20 : 60;
 
     function noteArgs(chunk) {
         const inputs = [];
@@ -278,24 +280,39 @@ async function synth(payload, id) {
         return { inputs, filters };
     }
 
-    // execFile на Windows в редких случаях (замечено на реальном железе — "spawn UNKNOWN") бросает
-    // исключение СИНХРОННО, а не через колбэк с err — без try/catch это рушит весь Promise.all
-    // необработанным отказом (падал ВЕСЬ рендер из-за одного упавшего батча). Заворачиваем + логируем
-    // ВСЕ поля ошибки (code/errno/syscall/path), а не только message — этого добивались две правки
-    // подряд (ограничение параллелизма, абсолютный путь к ffmpeg) вслепую и не помогли; раз ошибка
-    // стабильно ловится на КАЖДОМ батче независимо от них — дело не в конкурентности и не в резолве
-    // ffmpeg, а в чём-то другом (гипотеза — cwd с не-ASCII путём, см. отказ от cwd ниже); если и это
-    // не поможет, подробный лог здесь даст точный код ошибки Windows вместо догадок.
+    // ПРИЧИНА "spawn UNKNOWN" (errno -4094) на Windows: libuv не может напрямую запустить exe, чей
+    // ПУТЬ содержит не-ASCII символы — а winget ставит ffmpeg под C:\Users\<кириллица>\AppData\...
+    // (у русских пользователей это норма). Отсюда падение на КАЖДОМ батче, и почему абсолютный путь
+    // не помог (сам путь и был проблемным). Решение: на Windows запускаем ffmpeg НЕ напрямую, а через
+    // cmd.exe (он лежит в ASCII-пути System32 — libuv его спокойно спавнит), передавая команду во
+    // временном .bat (UTF-8 + chcp 65001, чтобы cmd корректно прочёл не-ASCII путь). cmd сам стартует
+    // ffmpeg с любым путём. Это заодно чинит winget-шимы/алиасы. На Unix — прямой спавн, как и был.
+    const cq = (s) => '"' + String(s).replace(/"/g, '""') + '"'; // безопасные кавычки для cmd
+    let batSeq = 0;
     function runFfmpeg(args) {
         return new Promise((resolve) => {
+            const done = (err, stderr) => {
+                if (err) {
+                    const detail = ["code=" + err.code, "errno=" + err.errno, "syscall=" + err.syscall, "path=" + err.path].join(" ");
+                    return resolve({ ok: false, tail: (stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : err.message) + " [" + detail + "]" });
+                }
+                resolve({ ok: true });
+            };
             try {
-                execFile(FFMPEG, args, { maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
-                    if (err) {
-                        const detail = ["code=" + err.code, "errno=" + err.errno, "syscall=" + err.syscall, "path=" + err.path].join(" ");
-                        return resolve({ ok: false, tail: (stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : err.message) + " [" + detail + "]" });
-                    }
-                    resolve({ ok: true });
-                });
+                if (process.platform === "win32") {
+                    const bat = path.join(OUT_DIR, "_ff_" + process.pid + "_" + (batSeq++) + ".bat");
+                    // Если путь к ffmpeg не-ASCII — зовём по голому имени (cmd сам найдёт в PATH, не тащим
+                    // кириллицу в .bat); иначе явный путь — уважаем свой runtime/ffmpeg.exe.
+                    const ffInvoke = /[^\x00-\x7F]/.test(String(FFMPEG || "")) ? "ffmpeg" : cq(FFMPEG);
+                    const cmdline = ffInvoke + " " + args.map(cq).join(" ");
+                    fs.writeFileSync(bat, "@echo off\r\nchcp 65001>nul\r\n" + cmdline + "\r\n", "utf8");
+                    execFile("cmd", ["/d", "/s", "/c", cq(bat)], { maxBuffer: 64 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: true }, (err, _o, stderr) => {
+                        try { fs.unlinkSync(bat); } catch { /* ignore */ }
+                        done(err, stderr);
+                    });
+                    return;
+                }
+                execFile(FFMPEG, args, { maxBuffer: 64 * 1024 * 1024 }, (err, _o, stderr) => done(err, stderr));
             } catch (e) {
                 const detail = ["code=" + e.code, "errno=" + e.errno, "syscall=" + e.syscall, "path=" + e.path].join(" ");
                 resolve({ ok: false, tail: "spawn исключение: " + (e && e.message) + " [" + detail + "]" });
