@@ -27,25 +27,33 @@ function bundledPath() {
     return null;
 }
 
-// Проверка "ffmpeg есть в PATH системы" — на Windows через where (то же самое, чем его находит
-// start-server.bat), иначе прямым запуском (без шелла — на Windows нет sh).
-function foundOnPath() {
+// Находит ffmpeg в PATH системы и возвращает ПОЛНЫЙ АБСОЛЮТНЫЙ путь к нему (не просто true/false
+// и не голое имя "ffmpeg"!). Это важно: server/lib/render.js спавнит ffmpeg с опцией cwd (батчи
+// рендера — короткие относительные пути к сэмплам). Если передать execFile ГОЛОЕ имя "ffmpeg"
+// вместе с cwd, отличным от того, где реально лежит бинарник, Node/Windows временами не могут его
+// разрешить и падают с малопонятным "spawn UNKNOWN" (замечено на реальном железе пользователя).
+// Абсолютный путь снимает всю двусмысленность — cwd тогда влияет только на относительные
+// аргументы команды, а не на поиск самого исполняемого файла.
+function resolveOnPath() {
     try {
-        if (process.platform === "win32") cp.execFileSync("where", ["ffmpeg"], { stdio: "ignore" });
-        else cp.execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
-        return true;
-    } catch (e) {
-        if (process.platform === "win32") return false; // where ничего не нашёл
-        return !!(e && e.code && e.code !== "ENOENT"); // запустился, но упал — команда есть
+        if (process.platform === "win32") {
+            const out = cp.execFileSync("where", ["ffmpeg"], { encoding: "utf8" });
+            return out.split(/\r?\n/).map((s) => s.trim()).find(Boolean) || null;
+        }
+        // Linux/macOS: "command -v" — единственный переносимый способ узнать сразу и "есть ли
+        // команда", и её полный путь одной проверкой (sh есть — не Windows).
+        const out = cp.execFileSync("sh", ["-lc", "command -v ffmpeg"], { encoding: "utf8" });
+        return out.trim() || null;
+    } catch {
+        return null; // не найден (или, на Unix, найден, но без прав запуска — тоже null, это ОК)
     }
 }
 
 const bundled = bundledPath();
-const onPath = !bundled && foundOnPath(); // PATH проверяем, только если бандл не нашли (не нужно дважды)
-// FFMPEG — что передавать в execFile/execFileSync как имя команды: путь к своему бинарнику,
-// просто "ffmpeg" (если он в PATH), либо null (нигде не нашли).
-const FFMPEG = bundled || (onPath ? "ffmpeg" : null);
-const SOURCE = bundled ? "свой (" + bundled + ")" : (FFMPEG ? "системный (PATH)" : null);
+const onPathResolved = bundled ? null : resolveOnPath(); // PATH проверяем, только если бандла нет
+// FFMPEG — ВСЕГДА полный путь к бинарнику (свой в runtime/, либо резолвнутый из PATH), либо null.
+const FFMPEG = bundled || onPathResolved;
+const SOURCE = bundled ? "свой (" + bundled + ")" : (FFMPEG ? "системный (PATH, " + FFMPEG + ")" : null);
 
 // Подробный отчёт — печатаем при старте, чтобы при жалобе "не находит" не пришлось гадать:
 // видно, какие именно пути проверялись и что там реально есть на диске.
@@ -56,8 +64,8 @@ function diagnose() {
     for (const p of BUNDLED_CANDIDATES) {
         lines.push("[dodo]   " + p + " — " + (fs.existsSync(p) ? "ЕСТЬ" : "нет"));
     }
-    lines.push("[dodo]   поиск в PATH (" + (process.platform === "win32" ? "where ffmpeg" : "ffmpeg -version") + "): "
-        + (bundled ? "не проверялся (уже нашли свой)" : (onPath ? "найден" : "НЕ найден")));
+    lines.push("[dodo]   поиск в PATH (" + (process.platform === "win32" ? "where ffmpeg" : "command -v ffmpeg") + "): "
+        + (bundled ? "не проверялся (уже нашли свой)" : (onPathResolved || "НЕ найден")));
     lines.push("[dodo]   итог: " + (FFMPEG ? ("используется " + SOURCE + " → \"" + FFMPEG + "\"") : "ffmpeg НЕ найден нигде"));
     return lines;
 }
