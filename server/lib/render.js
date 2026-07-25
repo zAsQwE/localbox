@@ -181,7 +181,7 @@ async function synth(payload, id) {
                 if (!seg) continue;
                 const midi = Math.round(seg[1] + level * (seg[2] - seg[1]));
                 const s = pickSample(main.urls, midi);
-                if (s && Math.abs(s.shift || 0) <= 36) { events.push({ startMs: start, durMs: dur, slug, name: s.name, shift: s.shift, volDb: mainVol }); added++; }
+                if (s) { events.push({ startMs: start, durMs: dur, slug, name: s.name, shift: Math.max(-36, Math.min(36, s.shift || 0)), volDb: mainVol }); added++; }
             }
             const flubC = flubSampler(instr);
             if (flubC && Array.isArray(flubC.urls) && flubC.urls.length) {
@@ -202,7 +202,9 @@ async function synth(payload, id) {
                     events.push({ startMs: t + offset, durMs, synth: true, freq: 440 * Math.pow(2, (midi - 69) / 12), volDb: mainVol });
                 } else {
                     const s = isDrum ? pickDrum(main.urls, midi) : pickSample(main.urls, midi);
-                    if (s && Math.abs(s.shift || 0) <= 36) events.push({ startMs: t + offset, durMs, slug, name: s.name, shift: s.shift, volDb: mainVol });
+                    // Не РОНЯЕМ ноту при большом сдвиге — ограничиваем ±36 полутонов (asetrate/atempo
+                    // тогда в пределах ffmpeg), но нота ЗВУЧИТ, а не пропадает молча.
+                    if (s) events.push({ startMs: t + offset, durMs, slug, name: s.name, shift: Math.max(-36, Math.min(36, s.shift || 0)), volDb: mainVol });
                 }
             }
         }
@@ -334,7 +336,16 @@ async function synth(payload, id) {
     for (let i = 0; i < batches.length; i++) {
         const { inputs, filters } = noteArgs(batches[i]);
         const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
-        batchResults.push(await runFfmpeg(args));
+        // Ретрай: на Windows батч иногда срывается транзиентно (cmd/антивирус на частый спавн exe) —
+        // без повтора его ноты молча пропадали («иногда не слышно сыгранного»). До 3 попыток.
+        let res;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            res = await runFfmpeg(args);
+            if (res.ok && fs.existsSync(batchFiles[i])) break;
+            if (attempt < 3) await sleep(200);
+        }
+        if (!res.ok) console.log("[render] батч " + (i + 1) + "/" + batches.length + " не собрался после 3 попыток (" + batches[i].length + " нот пропущено): " + res.tail);
+        batchResults.push(res);
         if (i < batches.length - 1) await sleep(60);
     }
     const okBatchFiles = batchFiles.filter((f, i) => batchResults[i].ok && fs.existsSync(f));
