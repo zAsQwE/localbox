@@ -263,9 +263,10 @@ async function synth(payload, id) {
                 f = `[${idx}:a]afade=t=in:d=0.005,afade=t=out:st=${(durSec - rel).toFixed(3)}:d=${rel.toFixed(3)}` +
                     `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
             } else {
-                // Путь ОТНОСИТЕЛЬНО INSTR_DIR (см. cwd в execFile ниже) — короче абсолютного, доп.
-                // запас по длине командной строки поверх самого батчинга.
-                inputs.push("-i", path.relative(INSTR_DIR, paths[e.slug + "|" + e.name]));
+                // АБСОЛЮТНЫЙ путь (не через cwd — см. пояснение выше noteArgs про отказ от cwd).
+                // Батчинг по 60 нот уже сам по себе держит команду далеко от лимита длины даже
+                // с полными путями — относительность тут не нужна и не стоит связанного риска.
+                inputs.push("-i", paths[e.slug + "|" + e.name]);
                 f = `[${idx}:a]atrim=0:${durSec.toFixed(3)}`;
                 if (e.shift) { const r = pow2(e.shift); f += `,asetrate=44100*${r.toFixed(5)},aresample=44100,${atempoChain(1 / r)}`; }
                 f += `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
@@ -279,23 +280,32 @@ async function synth(payload, id) {
 
     // execFile на Windows в редких случаях (замечено на реальном железе — "spawn UNKNOWN") бросает
     // исключение СИНХРОННО, а не через колбэк с err — без try/catch это рушит весь Promise.all
-    // необработанным отказом (падал ВЕСЬ рендер из-за одного упавшего батча). Заворачиваем.
-    function runFfmpeg(args, cwd) {
+    // необработанным отказом (падал ВЕСЬ рендер из-за одного упавшего батча). Заворачиваем + логируем
+    // ВСЕ поля ошибки (code/errno/syscall/path), а не только message — этого добивались две правки
+    // подряд (ограничение параллелизма, абсолютный путь к ffmpeg) вслепую и не помогли; раз ошибка
+    // стабильно ловится на КАЖДОМ батче независимо от них — дело не в конкурентности и не в резолве
+    // ffmpeg, а в чём-то другом (гипотеза — cwd с не-ASCII путём, см. отказ от cwd ниже); если и это
+    // не поможет, подробный лог здесь даст точный код ошибки Windows вместо догадок.
+    function runFfmpeg(args) {
         return new Promise((resolve) => {
             try {
-                execFile(FFMPEG, args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
-                    resolve({ ok: !err, tail: stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message) });
+                execFile(FFMPEG, args, { maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
+                    if (err) {
+                        const detail = ["code=" + err.code, "errno=" + err.errno, "syscall=" + err.syscall, "path=" + err.path].join(" ");
+                        return resolve({ ok: false, tail: (stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : err.message) + " [" + detail + "]" });
+                    }
+                    resolve({ ok: true });
                 });
             } catch (e) {
-                resolve({ ok: false, tail: "spawn исключение: " + (e && e.message) });
+                const detail = ["code=" + e.code, "errno=" + e.errno, "syscall=" + e.syscall, "path=" + e.path].join(" ");
+                resolve({ ok: false, tail: "spawn исключение: " + (e && e.message) + " [" + detail + "]" });
             }
         });
     }
 
-    // Батчи мешаем НЕБОЛЬШИМИ группами параллельно (не все разом) — большое число одновременных
-    // дочерних процессов на Windows иногда провоцирует те же спонтанные "spawn UNKNOWN". Группа из
-    // нескольких штук почти не теряет во времени против полностью параллельного запуска.
-    fs.mkdirSync(INSTR_DIR, { recursive: true });
+    // Батчи мешаем небольшими группами параллельно (не все разом — если проблема была в числе
+    // одновременных процессов). НЕ используем cwd (см. выше) — сэмплы АБСОЛЮТНЫМИ путями, батчинг
+    // по 60 нот сам по себе держит команду далеко от лимита длины даже так.
     const CONCURRENCY = 3;
     const batches = [];
     for (let start = 0; start < usable.length; start += BATCH) batches.push(usable.slice(start, start + BATCH));
@@ -307,7 +317,7 @@ async function synth(payload, id) {
             const i = g + j;
             const { inputs, filters } = noteArgs(chunk);
             const args = [...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-y", batchFiles[i]];
-            return runFfmpeg(args, INSTR_DIR);
+            return runFfmpeg(args);
         }));
         results.forEach((r, j) => { batchResults[g + j] = r; });
     }
@@ -337,7 +347,7 @@ async function synth(payload, id) {
         "-ac", "2", "-ar", "44100", "-b:a", "192k", "-y", out];
 
     console.log(`[render] ffmpeg: ${usable.length} нот (${okBatchFiles.length} батч.)${backing ? " + бэкинг" : ""} → ${id}.mp3`);
-    const finalRes = await runFfmpeg(finalArgs, undefined);
+    const finalRes = await runFfmpeg(finalArgs);
     cleanupBatches();
     if (!finalRes.ok || !fs.existsSync(out) || fs.statSync(out).size < 200) {
         console.log("[render] ffmpeg не собрал mp3: " + finalRes.tail);
