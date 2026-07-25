@@ -251,7 +251,11 @@ async function synth(payload, id) {
             f = `[${idx}:a]afade=t=in:d=0.005,afade=t=out:st=${(durSec - rel).toFixed(3)}:d=${rel.toFixed(3)}` +
                 `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
         } else {
-            inputs.push("-i", paths[e.slug + "|" + e.name]);
+            // Путь ОТНОСИТЕЛЬНО INSTR_DIR (см. cwd в execFile ниже) — на Windows у CreateProcess
+            // жёсткий лимит длины командной строки (~32К символов), а песня может иметь сотни нот
+            // → сотни -i с абсолютными путями легко его превышают (spawn ENAMETOOLONG). Linux/macOS
+            // такого лимита практически не имеют, поэтому раньше это не всплывало в разработке.
+            inputs.push("-i", path.relative(INSTR_DIR, paths[e.slug + "|" + e.name]));
             f = `[${idx}:a]atrim=0:${durSec.toFixed(3)}`;
             if (e.shift) { const r = pow2(e.shift); f += `,asetrate=44100*${r.toFixed(5)},aresample=44100,${atempoChain(1 / r)}`; }
             f += `,volume=${dbToLin(e.volDb).toFixed(4)},adelay=${e.startMs}|${e.startMs}[a${idx}]`;
@@ -275,12 +279,20 @@ async function synth(payload, id) {
         filters.push(`[mix]alimiter=limit=0.95[out]`);
         last = "[out]";
     }
-    const args = [...inputs, "-filter_complex", filters.join(";"), "-map", last,
+    // Граф фильтров — в отдельный файл (-filter_complex_script), а не аргументом командной строки:
+    // при сотнях нот сама строка фильтров легко тянет на десятки КБ, что вместе с -i выше упирается
+    // в тот же лимит длины командной строки на Windows.
+    const filterFile = path.join(OUT_DIR, id + ".filters.txt");
+    fs.writeFileSync(filterFile, filters.join(";"), "utf8");
+    const args = [...inputs, "-filter_complex_script", filterFile, "-map", last,
         "-ac", "2", "-ar", "44100", "-b:a", "192k", "-y", out];
 
     return new Promise((resolve) => {
         console.log(`[render] ffmpeg: ${usable.length} нот${backing ? " + бэкинг" : ""} → ${id}.mp3`);
-        execFile(FFMPEG, args, { maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
+        // cwd = INSTR_DIR: пути сэмплов выше относительные (см. пояснение про -i) — ffmpeg
+        // разрешает их отсюда; абсолютные (бэкинг/выход/файл фильтров) от cwd не зависят.
+        execFile(FFMPEG, args, { cwd: INSTR_DIR, maxBuffer: 64 * 1024 * 1024 }, (err, _stdout, stderr) => {
+            try { fs.unlinkSync(filterFile); } catch { /* ignore */ }
             if (err || !fs.existsSync(out) || fs.statSync(out).size < 200) {
                 const tail = (stderr ? String(stderr).trim().split("\n").slice(-3).join(" | ") : (err && err.message)) || "?";
                 console.log("[render] ffmpeg не собрал mp3: " + tail);
