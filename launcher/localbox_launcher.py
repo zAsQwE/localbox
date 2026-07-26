@@ -524,6 +524,15 @@ def _no_display():
 
 def main():
     o = parse_cli(sys.argv[1:])
+    # Если лаунчер запущен из start-server.bat в режиме «Додо Ре Ми» (он ставит LOCALBOX_DODO=1) —
+    # синхронизируем это в сохранённую настройку, чтобы галочка «Додо Ре Ми» в окне была включена
+    # (иначе движок бы поднял игру по env, а галочка осталась бы снятой — рассинхрон). Только ВКЛ:
+    # выключаем лишь вручную снятием галочки, чтобы обычный запуск GUI ничего не сбрасывал.
+    if os.environ.get("LOCALBOX_DODO") == "1":
+        _cfg = settings.load()
+        if not _cfg.get("dodo_render"):
+            _cfg["dodo_render"] = True
+            settings.save(_cfg)
     if o["check"]:
         check_environment()
         return
