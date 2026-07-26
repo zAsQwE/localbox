@@ -8,7 +8,7 @@
 
 tg = https://t.me/lacalbox (alt = https://telegram.me/lacalbox)
 
-Как запустить localbox Сервер локально/онлайн (туториал) = https://youtu.be/kZr1dSFpLWc?si=vQAgiyIUMdwTaE-x
+Как запустить localbox Сервер локально/онлайн (туториал для Windows) = https://youtu.be/kZr1dSFpLWc?si=vQAgiyIUMdwTaE-x
 
 ---
 
