@@ -202,6 +202,8 @@ class EngineProcess:
                 env["LOCALBOX_CHEAT_ANSWER"] = "0"
             if not _s.get("cheat_price", True):
                 env["LOCALBOX_CHEAT_PRICE"] = "0"
+            if not _s.get("cheat_highlight", True):
+                env["LOCALBOX_CHEAT_HIGHLIGHT"] = "0"
             self.on_log(f"Читы включены для: {_admins} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).")
         # Фиксированный код комнаты (свой/русский), если задан.
         _code = (_s.get("room_code") or "").strip()

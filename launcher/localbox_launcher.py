@@ -190,6 +190,7 @@ def run_gui():
         back_var = tk.DoubleVar(value=float(cfg.get("render_backing", 0.45)))
         admin_var = tk.StringVar(value=cfg.get("admin_nicks", ""))
         cheat_answer_var = tk.BooleanVar(value=cfg.get("cheat_answer", True))
+        cheat_highlight_var = tk.BooleanVar(value=cfg.get("cheat_highlight", True))
         cheat_price_var = tk.BooleanVar(value=cfg.get("cheat_price", True))
         room_code_var = tk.StringVar(value=cfg.get("room_code", ""))
         WRAP = 330
@@ -382,8 +383,10 @@ def run_gui():
                   font=("", 11, "bold")).pack(anchor="w")
         ttk.Label(card4, text="Ники с читами (через запятую):", style="Card.TLabel").pack(anchor="w", pady=(6, 2))
         ttk.Entry(card4, textvariable=admin_var).pack(fill="x")
-        ttk.Checkbutton(card4, text="Показывать правильный ответ (викторины/Бредовуха)",
-                        variable=cheat_answer_var, style="Card.TCheckbutton").pack(anchor="w", pady=(6, 0))
+        ttk.Checkbutton(card4, text="Подсвечивать правильный вариант на кнопке в игре (все викторины)",
+                        variable=cheat_highlight_var, style="Card.TCheckbutton").pack(anchor="w", pady=(6, 0))
+        ttk.Checkbutton(card4, text="Показывать правильный ответ списком в панели",
+                        variable=cheat_answer_var, style="Card.TCheckbutton").pack(anchor="w")
         ttk.Checkbutton(card4, text="Показывать цену картины (Дуракцион) — ценник у картины",
                         variable=cheat_price_var, style="Card.TCheckbutton").pack(anchor="w")
         ttk.Label(card4, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
@@ -409,6 +412,7 @@ def run_gui():
             cfg["render_backing"] = round(float(back_var.get()), 2)
             cfg["admin_nicks"] = admin_var.get().strip()
             cfg["cheat_answer"] = cheat_answer_var.get()
+            cfg["cheat_highlight"] = cheat_highlight_var.get()
             cfg["cheat_price"] = cheat_price_var.get()
             cfg["room_code"] = room_code_var.get().strip()
             settings.save(cfg)

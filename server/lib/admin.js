@@ -20,6 +20,8 @@ const ADMINS = new Set((process.env.LOCALBOX_ADMINS || "").split(",").map((s) =>
 const SHOW_ANSWER = process.env.LOCALBOX_CHEAT_ANSWER !== "0";
 // Показывать цену картины (Дуракцион/Bidiots) пульсирующим ценником у картины. Выкл: LOCALBOX_CHEAT_PRICE=0.
 const SHOW_PRICE = process.env.LOCALBOX_CHEAT_PRICE !== "0";
+// Подсвечивать правильный вариант ПРЯМО НА КНОПКЕ в игре (все викторины). Выкл: LOCALBOX_CHEAT_HIGHLIGHT=0.
+const SHOW_HIGHLIGHT = process.env.LOCALBOX_CHEAT_HIGHLIGHT !== "0";
 function isAdmin(nick) { return ADMINS.has(String(nick || "").trim().toLowerCase()); }
 function enabled() { return ADMINS.size > 0; }
 function adminList() { return [...ADMINS]; }
@@ -106,7 +108,7 @@ function mountHttp(app) {
     // Отдельной веб-страницы /admin больше нет — только оверлей, встраиваемый в игровой клиент.
     // В начало оверлея подставляем конфиг (показывать ли «правильный ответ»).
     app.get("/admin/overlay.js", (_req, res) =>
-        res.type("application/javascript").send("window.__lbxCfg={showAnswer:" + SHOW_ANSWER + ",showPrice:" + SHOW_PRICE + "};\n" + OVERLAY_JS));
+        res.type("application/javascript").send("window.__lbxCfg={showAnswer:" + SHOW_ANSWER + ",showPrice:" + SHOW_PRICE + ",highlight:" + SHOW_HIGHLIGHT + "};\n" + OVERLAY_JS));
 }
 
 // Оверлей-панелька, встраиваемая в игровой клиент (client.js вставляет <script src="/admin/overlay.js">).
@@ -116,6 +118,7 @@ if(window.__lbxAdmin)return;window.__lbxAdmin=1;
 var ws=null,code=null,ents={},players=[],me=null,appTag='',open=false,authed=false,nick='',poll=null;
 var SHOWANS=!(window.__lbxCfg&&window.__lbxCfg.showAnswer===false);   // показывать «правильный ответ» (настройка)
 var SHOWPRICE=!(window.__lbxCfg&&window.__lbxCfg.showPrice===false);  // показывать цену картины (Дуракцион)
+var HILITE=!(window.__lbxCfg&&window.__lbxCfg.highlight===false);     // подсвечивать правильную кнопку в игре
 var STRONG=/^(correct|truth|iscorrect|istrue|rightanswer|correctanswer|solution|winner|answertext|secret|realprice|actualprice)$/i;
 var WEAK=/(answer|price|cost|value|target|reward|payout|worth)/i;
 var OWS=window.WebSocket;
@@ -232,7 +235,7 @@ function correctTexts(){var out=[];
 // Подсветить прямо в игре кнопку/элемент, чей текст совпадает с правильным ответом.
 function highlightAnswer(){
  var prev=document.querySelectorAll('.lbxCorrect');for(var j=0;j<prev.length;j++)prev[j].classList.remove('lbxCorrect');
- if(!SHOWANS||!authed)return;
+ if(!HILITE||!authed)return;
  var cts=correctTexts();if(!cts.length)return;
  var nodes=document.querySelectorAll('button,[role=button],a,li,label,div,span,p');
  for(var i=0;i<nodes.length;i++){var el=nodes[i];try{
