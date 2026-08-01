@@ -147,7 +147,10 @@ var css=[
 '#lbxa .card{background:#1b1630;border-radius:9px;padding:8px;margin:6px 0}',
 // Пульсирующий ценник у картины (Дуракцион). Немного пульсирует, не перехватывает клики.
 '#lbxPrice{position:fixed;z-index:2147483646;background:#ffd23f;color:#241a00;font:800 15px/1 system-ui,sans-serif;padding:4px 9px;border-radius:10px;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.55);white-space:nowrap;animation:lbxPulse 1.5s ease-in-out infinite;transform-origin:center}',
-'@keyframes lbxPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}'
+'@keyframes lbxPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}',
+// Подсветка кнопки правильного ответа прямо в игре (зелёное свечение + лёгкая пульсация).
+'.lbxCorrect{outline:3px solid #24e07a !important;outline-offset:-2px !important;border-radius:10px !important;animation:lbxGlow 1.25s ease-in-out infinite !important}',
+'@keyframes lbxGlow{0%,100%{box-shadow:0 0 0 2px rgba(36,224,122,.5),0 0 10px 2px rgba(36,224,122,.55)}50%{box-shadow:0 0 0 4px rgba(36,224,122,.85),0 0 24px 5px rgba(36,224,122,.9)}}'
 ].join('');
 var st=document.createElement('style');st.textContent=css;(document.head||document.documentElement).appendChild(st);
 var root=document.createElement('div');root.id='lbxa';root.style.display='none';
@@ -214,6 +217,30 @@ function pinPrice(){var tag=document.getElementById('lbxPrice');
  if(best){var r=best.getBoundingClientRect();var tw=tag.offsetWidth||64;
    tag.style.left=Math.max(2,Math.min(window.innerWidth-tw-2,r.right-tw-6))+'px';tag.style.top=Math.max(2,r.top+6)+'px';tag.style.right='';}
  else{tag.style.left='';tag.style.right='12px';tag.style.top='12px';}}
+function normT(s){return String(s==null?'':s).replace(/<[^>]+>/g,' ').replace(/[\s ]+/g,' ').trim().toUpperCase();}
+// Тексты правильных ответов: явные метки correct/isCorrect/*Text/truth + правда-по-исключению (Бредовуха).
+function correctTexts(){var out=[];
+ Object.keys(ents).forEach(function(k){try{(function w(o){if(o==null||typeof o!=='object')return;
+   if(Array.isArray(o)){o.forEach(function(it){if(it&&typeof it==='object'&&(it.correct===true||it.isCorrect===true||it.isTrue===true||it.right===true)){var t=it.text||it.label||it.title||it.name||it.answer;if(t)out.push(t);}w(it);});return;}
+   Object.keys(o).forEach(function(kk){var v=o[kk],lk=kk.toLowerCase();
+     if((lk==='correcttext'||lk==='answertext'||lk==='truth'||lk==='solution'||lk==='rightanswer'||lk==='correctanswer'||lk==='realanswer')&&(typeof v==='string'||typeof v==='number'))out.push(v);
+     w(v);});})(ents[k].body&&ents[k].body.val);}catch(_){}});
+ try{var room=(ents['bc:room']&&ents['bc:room'].body&&ents['bc:room'].body.val)||{};var ch=Array.isArray(room.choices)?room.choices:null;
+   if(ch){var entered=[];Object.keys(ents).forEach(function(k){if(k.indexOf('bc:customer:')!==0)return;var v=ents[k].body.val||{};var said=v.entry||v.lieEntered||v.chosen;if(said&&typeof said==='string')entered.push(normT(said));});
+     if(entered.length)ch.forEach(function(x){var t=typeof x==='string'?x:(x.text||x.html||'');if(t&&entered.indexOf(normT(t))<0)out.push(t);});}}catch(_){}
+ var seen={},res=[];out.forEach(function(t){var n=normT(t);if(n.length>=2&&!seen[n]){seen[n]=1;res.push(n);}});return res;}
+// Подсветить прямо в игре кнопку/элемент, чей текст совпадает с правильным ответом.
+function highlightAnswer(){
+ var prev=document.querySelectorAll('.lbxCorrect');for(var j=0;j<prev.length;j++)prev[j].classList.remove('lbxCorrect');
+ if(!SHOWANS||!authed)return;
+ var cts=correctTexts();if(!cts.length)return;
+ var nodes=document.querySelectorAll('button,[role=button],a,li,label,div,span,p');
+ for(var i=0;i<nodes.length;i++){var el=nodes[i];try{
+   if(el.closest&&(el.closest('#lbxa')||el.closest('.lbxCorrect')))continue;
+   if(el.children&&el.children.length>4)continue;
+   var t=normT(el.textContent);if(t.length<2||t.length>90)continue;
+   for(var c=0;c<cts.length;c++){if(t===cts[c]||(cts[c].length>=5&&t.length<=cts[c].length+6&&t.indexOf(cts[c])>=0)){el.classList.add('lbxCorrect');break;}}
+ }catch(_){}}}
 function render(){
  if(!open)return;
  if(!authed){ // форма входа (по секретной комбинации Ctrl+Shift+K, если авто-детект не сработал)
@@ -293,7 +320,7 @@ document.addEventListener('keydown',function(e){
  if(e.ctrlKey&&e.shiftKey&&(e.key==='K'||e.key==='k'||e.code==='KeyK')){
    window.__lbxManual=true;root.style.display='';open=true;panel.classList.add('on');render();}
 },true);
-setInterval(pinPrice,600);   // подтягиваем ценник к картине (её позиция/размер меняются по ходу игры)
+setInterval(function(){pinPrice();highlightAnswer();},600);   // ценник у картины + подсветка правильной кнопки
 try{console.log('[LocalBox] оверлей читов загружен. Если панель не появилась сама — Ctrl+Shift+K и введи админ-ник.');}catch(_){}
 })();`;
 
