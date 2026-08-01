@@ -193,11 +193,19 @@ class EngineProcess:
         # Громкость рендера Додо Ре Ми (инструмент / бэкинг).
         env["LOCALBOX_RENDER_INSTR"] = str(_s.get("render_instr", 4.0))
         env["LOCALBOX_RENDER_BACKING"] = str(_s.get("render_backing", 0.45))
-        # Админ-читы: ники (через запятую), которым доступна панель /admin.
+        # Читы: ники (через запятую), которым доступен чит-оверлей прямо в игре.
         _admins = (_s.get("admin_nicks") or os.environ.get("LOCALBOX_ADMINS") or "").strip()
         if _admins:
             env["LOCALBOX_ADMINS"] = _admins
-            self.on_log(f"Админ-панель включена для: {_admins} — открой https://{self.server_url}/admin")
+            # Показ «правильного ответа» — по настройке (по умолчанию включён).
+            if not _s.get("cheat_answer", True):
+                env["LOCALBOX_CHEAT_ANSWER"] = "0"
+            self.on_log(f"Читы включены для: {_admins} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).")
+        # Фиксированный код комнаты (свой/русский), если задан.
+        _code = (_s.get("room_code") or "").strip()
+        if _code:
+            env["LOCALBOX_ROOM_CODE"] = _code
+            self.on_log(f"Код комнаты зафиксирован: {_code}")
         if self.no_web:
             env["LOCALBOX_NO_CLIENT"] = "1"
             self.on_log("Режим -no-web: веб-клиент не раздаётся (только игровой сервер).")

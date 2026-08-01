@@ -189,6 +189,8 @@ def run_gui():
         instr_var = tk.DoubleVar(value=float(cfg.get("render_instr", 4.0)))
         back_var = tk.DoubleVar(value=float(cfg.get("render_backing", 0.45)))
         admin_var = tk.StringVar(value=cfg.get("admin_nicks", ""))
+        cheat_answer_var = tk.BooleanVar(value=cfg.get("cheat_answer", True))
+        room_code_var = tk.StringVar(value=cfg.get("room_code", ""))
         WRAP = 330
 
         outer = ttk.Frame(win, padding=18)
@@ -372,19 +374,27 @@ def run_gui():
                   text="Инструмент громче = отчётливее ноты; бэкинг тише = меньше музыки. Применяется к следующему рендеру."
                   ).pack(anchor="w", pady=(4, 0))
 
-        # --- Админ-читы ---
+        # --- Читы (оверлей в игре) ---
         card4 = ttk.Frame(right, style="Card.TFrame", padding=14)
         card4.pack(fill="x", pady=(12, 0))
-        ttk.Label(card4, text="Админ-читы (панель /admin)", style="Card.TLabel",
+        ttk.Label(card4, text="Читы (оверлей в игре)", style="Card.TLabel",
                   font=("", 11, "bold")).pack(anchor="w")
-        ttk.Label(card4, text="Ники админов (через запятую):", style="Card.TLabel").pack(anchor="w", pady=(6, 2))
+        ttk.Label(card4, text="Ники с читами (через запятую):", style="Card.TLabel").pack(anchor="w", pady=(6, 2))
         ttk.Entry(card4, textvariable=admin_var).pack(fill="x")
+        ttk.Checkbutton(card4, text="Показывать правильный ответ (викторины/Бредовуха)",
+                        variable=cheat_answer_var, style="Card.TCheckbutton").pack(anchor="w", pady=(6, 0))
         ttk.Label(card4, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
-                  text="Кто вписан — заходит на https://АДРЕС/admin (браузером) и получает: God view "
-                       "(видеть секретные ответы/голоса/рисунки всех), подмену значений (напр. изменить "
-                       "ответ игрока в Бредовухе), кик/бан/мьют/переименование. Пусто = панель выключена. "
-                       "Только для игры с друзьями."
+                  text="Кто вписан — заходит в игру под этим ником и получает оверлей читов (вкладка справа, "
+                       "или Ctrl+Shift+K): God view (секретные ответы/голоса/рисунки всех), подсветка правильного "
+                       "ответа, подмена значений, кик/бан/мьют. Пусто = читы выключены. Только для игры с друзьями."
                   ).pack(anchor="w", pady=(6, 0))
+        # --- Код комнаты ---
+        ttk.Label(card4, text="Код комнаты (пусто = случайный):", style="Card.TLabel").pack(anchor="w", pady=(10, 2))
+        ttk.Entry(card4, textvariable=room_code_var).pack(fill="x")
+        ttk.Label(card4, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text="Свой фиксированный код вместо случайного (напр. ИГРА или GAME). Русские буквы можно, но "
+                       "телефон-клиент игры может не дать их ввести — тогда используй латиницу."
+                  ).pack(anchor="w", pady=(4, 0))
 
         def save_close():
             cfg["download_missing"] = dl_var.get()
@@ -395,6 +405,8 @@ def run_gui():
             cfg["render_instr"] = round(float(instr_var.get()), 2)
             cfg["render_backing"] = round(float(back_var.get()), 2)
             cfg["admin_nicks"] = admin_var.get().strip()
+            cfg["cheat_answer"] = cheat_answer_var.get()
+            cfg["room_code"] = room_code_var.get().strip()
             settings.save(cfg)
             log(f"Настройки сохранены (озвучка: {tts_var.get()} / {voice_var.get()}). "
                 "Применятся при следующем запуске сервера.")

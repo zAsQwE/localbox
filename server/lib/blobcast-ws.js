@@ -63,7 +63,7 @@ const actions = {
         const tag = state.register({ appId: msg.appId, appTag: state.games.appIds[msg.appId] });
         const room = new mgr.Room({
             appTag: tag, appId: msg.appId, userId: msg.userId,
-            forceRoomId: opts.forceRoomId || null,
+            forceRoomId: opts.forceRoomId || (process.env.LOCALBOX_ROOM_CODE || "").trim() || null,
             maxPlayers: opts.maxPlayers, minPlayers: opts.minPlayers,
             audienceEnabled: opts.audienceEnabled, password: opts.password,
         }, state.serverUrl, state.games);

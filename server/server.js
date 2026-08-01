@@ -33,6 +33,9 @@ try {
 } catch { /* нет таблицы — неизвестные игры регистрируются на лету */ }
 if (config.games) for (const k of ["appTags", "appIds", "maxPlayers", "minPlayers"]) Object.assign(state.games[k], config.games[k] || {});
 const serverUrl = state.serverUrl;
+// Кастомный код комнаты (вместо случайного) — задаётся в лаунчере. Пусто = случайный код.
+const ROOM_CODE = (process.env.LOCALBOX_ROOM_CODE || "").trim();
+if (ROOM_CODE) console.log("[room] код комнаты фиксирован: " + ROOM_CODE);
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -58,6 +61,7 @@ app.post("/api/v2/rooms", (req, res) => {
     if (!p.userId) return res.status(400).send({ ok: false, error: "missing required field userId" });
     if (!p.appTag) return res.status(400).send({ ok: false, error: "missing required field appTag" });
     state.register(p);
+    if (ROOM_CODE) p.forceRoomId = ROOM_CODE;   // фиксированный код комнаты из настроек
     const room = new mgr.Room(p, serverUrl, state.games);
     mgr.add(room);
     console.log("[room] created", room.code, "for", room.appTag, "(" + room.appId + ")");
@@ -158,15 +162,17 @@ function onUpgrade(request, socket, head) {
         wss.handleUpgrade(request, socket, head, (client) => handleBlobcast(client));
         return;
     }
-    // Ecast: /api/v2/rooms/CODE/play
-    const m = reqPath.match(/^\/api\/v2\/(?:rooms|audience)\/([A-Z]{4})\/play$/);
+    // Ecast: /api/v2/rooms/CODE/play. Код — не только 4 латинские буквы: поддерживаем кастомный
+    // код комнаты (LOCALBOX_ROOM_CODE), в т.ч. не-ASCII (в URL он percent-encoded → декодируем).
+    const m = reqPath.match(/^\/api\/v2\/(?:rooms|audience)\/([^/]+)\/play$/);
     if (!m) { console.log("[ws] апгрейд ОТКЛОНЁН (путь не распознан):", reqPath); socket.destroy(); return; }
+    let code; try { code = decodeURIComponent(m[1]); } catch { code = m[1]; }
     const query = {};
     (qs || "").split("&").forEach((kv) => {
         const i = kv.indexOf("=");
         if (i > 0) query[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
     });
-    wss.handleUpgrade(request, socket, head, (client) => handleConnection(client, m[1], query));
+    wss.handleUpgrade(request, socket, head, (client) => handleConnection(client, code, query));
 }
 
 let servers = [];

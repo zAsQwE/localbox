@@ -1,10 +1,11 @@
 "use strict";
 //
-// LocalBox — админ-панель (читы для приватной игры в LAN).
+// LocalBox — читы для приватной игры в LAN (оверлей прямо в игре, без отдельной веб-страницы).
 //
-// Доступ по нику из LOCALBOX_ADMINS (список ников через запятую). Открывается страница /admin
-// (НЕ игровой клиент). Возможности:
+// Доступ по нику из LOCALBOX_ADMINS (список ников через запятую). Читы встраиваются в игровой
+// клиент оверлеем (вкладка справа). Возможности:
 //   • God view — видеть ВСЕ сущности комнаты в реальном времени (секретные ответы/голоса/рисунки);
+//   • правильный ответ — подсветка (для викторин/Бредовухи); включается LOCALBOX_CHEAT_ANSWER;
 //   • подмена — менять значение любой сущности (напр. изменить ответ игрока в Бредовухе);
 //   • модерация — кик/бан/мьют/переименование игроков.
 //
@@ -15,6 +16,8 @@
 const mgr = require("./room.js");
 
 const ADMINS = new Set((process.env.LOCALBOX_ADMINS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+// Показывать в оверлее «правильный ответ» (подсветка для викторин/Бредовухи). Выкл: LOCALBOX_CHEAT_ANSWER=0.
+const SHOW_ANSWER = process.env.LOCALBOX_CHEAT_ANSWER !== "0";
 function isAdmin(nick) { return ADMINS.has(String(nick || "").trim().toLowerCase()); }
 function enabled() { return ADMINS.size > 0; }
 function adminList() { return [...ADMINS]; }
@@ -98,8 +101,10 @@ function doCmd(r, m, ws) {
 }
 
 function mountHttp(app) {
-    app.get("/admin", (_req, res) => res.type("html").send(PANEL_HTML));
-    app.get("/admin/overlay.js", (_req, res) => res.type("application/javascript").send(OVERLAY_JS));
+    // Отдельной веб-страницы /admin больше нет — только оверлей, встраиваемый в игровой клиент.
+    // В начало оверлея подставляем конфиг (показывать ли «правильный ответ»).
+    app.get("/admin/overlay.js", (_req, res) =>
+        res.type("application/javascript").send("window.__lbxCfg={showAnswer:" + SHOW_ANSWER + "};\n" + OVERLAY_JS));
 }
 
 // Оверлей-панелька, встраиваемая в игровой клиент (client.js вставляет <script src="/admin/overlay.js">).
@@ -107,13 +112,14 @@ function mountHttp(app) {
 const OVERLAY_JS = String.raw`(function(){
 if(window.__lbxAdmin)return;window.__lbxAdmin=1;
 var ws=null,code=null,ents={},players=[],me=null,appTag='',open=false,authed=false,nick='',poll=null;
+var SHOWANS=!(window.__lbxCfg&&window.__lbxCfg.showAnswer===false);   // показывать «правильный ответ» (настройка)
 var STRONG=/^(correct|truth|iscorrect|istrue|rightanswer|correctanswer|solution|winner|answertext|secret|realprice|actualprice)$/i;
 var WEAK=/(answer|price|cost|value|target|reward|payout|worth)/i;
 var OWS=window.WebSocket;
 // Перехват WS игры: при входе в игру берём НИК игрока и КОД комнаты из URL play-сокета.
-function Patched(url,protocols){try{var u=String(url);var m=u.match(/[/]api[/]v2[/]rooms[/]([A-Za-z]{4})[/]play[?](.*)$/);
+function Patched(url,protocols){try{var u=String(url);var m=u.match(/[/]api[/]v2[/]rooms[/]([^/]+?)[/]play[?](.*)$/);
  if(m){var nm=(m[2].match(/[?&]name=([^&]*)/)||[])[1];
-   if(nm){var n=decodeURIComponent(nm.replace(/[+]/g,' '));var c=m[1].toUpperCase();
+   if(nm){var n=decodeURIComponent(nm.replace(/[+]/g,' '));var c=decodeURIComponent(m[1]);
      if(n&&(n!==nick||c!==code)){nick=n;code=c;tryAuth();}}}}catch(_){}
  return protocols!==undefined?new OWS(url,protocols):new OWS(url);}
 Patched.prototype=OWS.prototype;['CONNECTING','OPEN','CLOSING','CLOSED'].forEach(function(k){try{Patched[k]=OWS[k];}catch(_){}});
@@ -220,18 +226,18 @@ function render(){
      d.innerHTML=esc(nm)+': '+(said?('<b>'+esc(typeof said==='string'?said:JSON.stringify(said))+'</b>'):'<span class="mut">—</span>')+extra;
      h.appendChild(d);});
    // В Бредовухе правда = вариант из списка, который никто не вводил.
-   if(roomCh&&entered.length){var truth=roomCh.map(function(x){return typeof x==='string'?x:(x.text||x.html||'');}).filter(function(t){return t&&entered.indexOf(String(t).toUpperCase())<0;});
+   if(SHOWANS&&roomCh&&entered.length){var truth=roomCh.map(function(x){return typeof x==='string'?x:(x.text||x.html||'');}).filter(function(t){return t&&entered.indexOf(String(t).toUpperCase())<0;});
      if(truth.length){var tr=document.createElement('div');tr.className='ans';tr.style.borderColor='#7fe08a';
        tr.innerHTML='✔ <b>Возможно правда:</b> '+truth.map(esc).join(' / ')+' <span class="mut">(нет в чужом вранье)</span>';h.appendChild(tr);}}
    var hint=document.createElement('div');hint.className='mut';
    hint.textContent='Правда = вариант, который никто из игроков не вводил (остальное — их враньё + вброс игры).';
    h.appendChild(hint);
  }
- var ans=sniff();
+ if(SHOWANS){var ans=sniff();
  var ha=document.createElement('h3');ha.textContent='🔎 Похоже на правильный ответ ('+ans.length+')';h.appendChild(ha);
  if(!ans.length){var mm=document.createElement('div');mm.className='mut';mm.textContent='пока не видно — игра могла не прислать ответ на сервер (появится, если пришлёт).';h.appendChild(mm);}
  ans.slice(0,25).forEach(function(o){var d=document.createElement('div');d.className='ans';
-   d.innerHTML='<b>'+esc(String(o.v))+'</b> <span class="mut">'+esc(o.h)+'</span><div class="k">'+esc(o.p)+'</div>';h.appendChild(d);});
+   d.innerHTML='<b>'+esc(String(o.v))+'</b> <span class="mut">'+esc(o.h)+'</span><div class="k">'+esc(o.p)+'</div>';h.appendChild(d);});}
  var mk=mine();if(mk.length){var hm=document.createElement('h3');hm.textContent='✏️ Мой ответ (сменить)';h.appendChild(hm);
    mk.forEach(function(k){var c=document.createElement('div');c.className='card';c.innerHTML='<div class="k">'+esc(k)+'</div>';c.appendChild(setBtn(k));h.appendChild(c);});}
  var hp=document.createElement('h3');hp.textContent='🔨 Игроки ('+players.filter(function(p){return p.role!=='host';}).length+')';h.appendChild(hp);
@@ -261,122 +267,5 @@ document.addEventListener('keydown',function(e){
 },true);
 try{console.log('[LocalBox] оверлей читов загружен. Если панель не появилась сама — Ctrl+Shift+K и введи админ-ник.');}catch(_){}
 })();`;
-
-const PANEL_HTML = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LocalBox — админ</title>
-<style>
-:root{--bg:#0f0d18;--card:#181428;--fg:#e7e2f5;--muted:#8f88a8;--acc:#7c5cff;--ok:#1fae8c;--bad:#e23b6d}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif}
-header{padding:12px 16px;background:var(--card);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-h1{font-size:16px;margin:0 12px 0 0}input,button,select{font:inherit}
-input,select{background:#221c38;border:1px solid #332b52;color:var(--fg);border-radius:8px;padding:7px 9px}
-button{background:var(--acc);border:0;color:#fff;border-radius:8px;padding:7px 12px;cursor:pointer}
-button.g{background:#2a2440}button.bad{background:var(--bad)}button.ok{background:var(--ok)}
-.wrap{display:flex;gap:14px;padding:14px;align-items:flex-start;flex-wrap:wrap}
-.col{background:var(--card);border-radius:12px;padding:12px;min-width:280px}
-.col.grow{flex:1;min-width:420px}
-.muted{color:var(--muted)}.pill{background:#2a2440;border-radius:20px;padding:2px 10px;margin-right:6px;cursor:pointer}
-table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:5px 6px;border-bottom:1px solid #241e3a;vertical-align:top;font-size:13px}
-td.k{font-family:monospace;color:#b7a6ff;word-break:break-all;max-width:220px}
-textarea{width:100%;min-height:40px;background:#221c38;color:var(--fg);border:1px solid #332b52;border-radius:6px;font-family:monospace;font-size:12px;padding:5px}
-.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0}
-#log{font-family:monospace;font-size:12px;color:#9fd;max-height:120px;overflow:auto;white-space:pre-wrap}
-.flash{animation:fl 1s}@keyframes fl{from{background:#3a2b6a}to{background:transparent}}
-.tag{font-size:11px;color:var(--muted)}
-</style></head><body>
-<header>
-  <h1>🎛️ LocalBox — админ</h1>
-  <input id="nick" placeholder="твой ник (из списка админов)" size="22">
-  <button id="conn">Подключиться</button>
-  <span id="st" class="muted">не подключено</span>
-</header>
-<div class="wrap">
-  <div class="col">
-    <b>Комнаты</b> <button class="g" id="ref">⟳</button>
-    <div id="rooms" class="row"></div>
-    <hr style="border-color:#241e3a">
-    <b>Игроки</b>
-    <table id="players"><tbody></tbody></table>
-  </div>
-  <div class="col grow">
-    <div class="row"><b>Сущности (God view)</b>
-      <input id="filter" placeholder="фильтр по ключу…" size="18">
-      <span class="muted" id="cnt"></span></div>
-    <table id="ents"><tbody></tbody></table>
-  </div>
-</div>
-<div class="wrap"><div class="col grow"><b>Лог</b><div id="log"></div></div></div>
-<script>
-var ws=null, code=null, ents={}, players=[];
-function log(s){var l=document.getElementById('log');l.textContent+=s+"\\n";l.scrollTop=l.scrollHeight;}
-function st(s,c){var e=document.getElementById('st');e.textContent=s;e.style.color=c||'#8f88a8';}
-function connect(){
-  var nick=document.getElementById('nick').value.trim();if(!nick)return;
-  localStorage.lbxNick=nick;
-  var url=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/admin/ws?nick='+encodeURIComponent(nick);
-  ws=new WebSocket(url);
-  ws.onopen=function(){st('подключение…');};
-  ws.onclose=function(){st('отключено','#e23b6d');};
-  ws.onmessage=function(ev){var m=JSON.parse(ev.data);handle(m);};
-}
-function sendc(o){o.code=code;ws.send(JSON.stringify(o));}
-function handle(m){
-  if(m.t==='ok'){st('онлайн ('+m.nick+')','#1fae8c');rooms(m.rooms);}
-  else if(m.t==='rooms')rooms(m.rooms);
-  else if(m.t==='err'){log('⚠ '+m.msg);st(m.msg,'#e23b6d');}
-  else if(m.t==='info')log(m.msg);
-  else if(m.t==='snapshot'){code=m.code;ents=m.entities;players=m.players;renderPlayers();renderEnts();log('смотрю комнату '+code);}
-  else if(m.t==='players'){players=m.players;renderPlayers();}
-  else if(m.t==='entity'){ents[m.key]={type:m.type,body:m.body};renderEnts(m.key);}
-  else if(m.t==='drop'){delete ents[m.key];renderEnts();}
-}
-function rooms(rs){
-  var d=document.getElementById('rooms');d.innerHTML='';
-  if(!rs.length)d.innerHTML='<span class="muted">нет активных комнат</span>';
-  rs.forEach(function(r){var b=document.createElement('span');b.className='pill';b.textContent=r.code+' ·'+r.appTag+' ('+r.players+')';
-    b.onclick=function(){code=r.code;sendc({cmd:'watch'});};d.appendChild(b);});
-}
-function renderPlayers(){
-  var tb=document.querySelector('#players tbody');tb.innerHTML='';
-  players.forEach(function(p){var tr=document.createElement('tr');
-    var muteTxt=p.muted?'размьют':'мьют';
-    tr.innerHTML='<td>#'+p.id+'</td><td>'+esc(p.name)+' <span class="tag">'+p.role+'</span></td>';
-    var td=document.createElement('td');
-    if(p.role!=='host'){
-      td.appendChild(btn('кик','bad',function(){sendc({cmd:'kick',id:p.id});}));
-      td.appendChild(btn('бан','bad',function(){sendc({cmd:'kick',id:p.id,ban:true});}));
-      td.appendChild(btn(muteTxt,'g',function(){sendc({cmd:'mute',id:p.id,on:!p.muted});}));
-      td.appendChild(btn('имя','g',function(){var n=prompt('новое имя',p.name);if(n)sendc({cmd:'rename',id:p.id,name:n});}));
-    }
-    tr.appendChild(td);tb.appendChild(tr);});
-}
-function btn(t,c,f){var b=document.createElement('button');b.textContent=t;b.className=c;b.style.marginRight='4px';b.style.padding='3px 7px';b.onclick=f;return b;}
-function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(x){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[x];});}
-function renderEnts(flashKey){
-  var f=document.getElementById('filter').value.toLowerCase();
-  var keys=Object.keys(ents).filter(function(k){return k.toLowerCase().indexOf(f)>=0;}).sort();
-  document.getElementById('cnt').textContent=keys.length+' шт';
-  var tb=document.querySelector('#ents tbody');tb.innerHTML='';
-  keys.forEach(function(k){var e=ents[k];var v=e.body&&e.body.val;
-    var tr=document.createElement('tr');if(k===flashKey)tr.className='flash';
-    var td1=document.createElement('td');td1.className='k';td1.textContent=k;
-    var td2=document.createElement('td');td2.innerHTML='<span class="tag">'+e.type+(e.body&&e.body.from!=null?' · from #'+e.body.from:'')+'</span>';
-    var ta=document.createElement('textarea');ta.value=fmt(v);
-    var td3=document.createElement('td');td3.appendChild(ta);
-    var td4=document.createElement('td');
-    td4.appendChild(btn('подменить','ok',function(){
-      var val;try{val=JSON.parse(ta.value);}catch(_){val=ta.value;}
-      sendc({cmd:'set',key:k,val:val,type:e.type,from:e.body&&e.body.from});
-    }));
-    tr.appendChild(td1);tr.appendChild(td2);td3.appendChild(document.createTextNode(''));tr.appendChild(td3);tr.appendChild(td4);tb.appendChild(tr);});
-}
-function fmt(v){try{return typeof v==='string'?v:JSON.stringify(v,null,1);}catch(_){return String(v);}}
-document.getElementById('conn').onclick=connect;
-document.getElementById('ref').onclick=function(){if(ws)ws.send(JSON.stringify({cmd:'rooms'}));};
-document.getElementById('filter').oninput=function(){renderEnts();};
-document.getElementById('nick').value=localStorage.lbxNick||'';
-document.getElementById('nick').addEventListener('keydown',function(e){if(e.key==='Enter')connect();});
-</script></body></html>`;
 
 module.exports = { isAdmin, enabled, adminList, handleWs, mountHttp, onRoomEvent };
