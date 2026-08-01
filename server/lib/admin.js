@@ -228,9 +228,17 @@ function correctTexts(){var out=[];
    Object.keys(o).forEach(function(kk){var v=o[kk],lk=kk.toLowerCase();
      if((lk==='correcttext'||lk==='answertext'||lk==='truth'||lk==='solution'||lk==='rightanswer'||lk==='correctanswer'||lk==='realanswer')&&(typeof v==='string'||typeof v==='number'))out.push(v);
      w(v);});})(ents[k].body&&ents[k].body.val);}catch(_){}});
- try{var room=(ents['bc:room']&&ents['bc:room'].body&&ents['bc:room'].body.val)||{};var ch=Array.isArray(room.choices)?room.choices:null;
-   if(ch){var entered=[];Object.keys(ents).forEach(function(k){if(k.indexOf('bc:customer:')!==0)return;var v=ents[k].body.val||{};var said=v.entry||v.lieEntered||v.chosen;if(said&&typeof said==='string')entered.push(normT(said));});
-     if(entered.length)ch.forEach(function(x){var t=typeof x==='string'?x:(x.text||x.html||'');if(t&&entered.indexOf(normT(t))<0)out.push(t);});}}catch(_){}
+ // Правда-по-исключению (без привязки к именам полей — работает и в Бредовухе 3): варианты =
+ // самый большой массив текстов в читаемых сущностях; «введённое игроками» = строки в bc:customer:*,
+ // совпадающие с вариантом. Правда = вариант, который НИКТО не вводил (это вброс игры, не враньё).
+ try{var choices=[];
+   Object.keys(ents).forEach(function(k){(function w(v){if(v==null)return;
+     if(Array.isArray(v)){if(v.length>=2){var tx=v.map(function(x){return typeof x==='string'?x:(x&&(x.text||x.html||x.label||x.title||x.answer)||'');}).filter(Boolean);if(tx.length>=2&&tx.length>choices.length)choices=tx;}v.forEach(w);}
+     else if(typeof v==='object')Object.keys(v).forEach(function(kk){w(v[kk]);});})(ents[k].body&&ents[k].body.val);});
+   if(choices.length>=2){var chN={};choices.forEach(function(t){chN[normT(t)]=t;});var entered={};
+     Object.keys(ents).forEach(function(k){if(k.indexOf('bc:customer:')!==0)return;(function w(v){if(v==null)return;if(typeof v==='string'){var n=normT(v);if(chN[n])entered[n]=1;}else if(Array.isArray(v))v.forEach(w);else if(typeof v==='object')Object.keys(v).forEach(function(kk){w(v[kk]);});})(ents[k].body&&ents[k].body.val);});
+     var ec=Object.keys(entered).length;
+     if(ec>=1&&ec<Object.keys(chN).length)Object.keys(chN).forEach(function(n){if(!entered[n])out.push(chN[n]);});}}catch(_){}
  var seen={},res=[];out.forEach(function(t){var n=normT(t);if(n.length>=2&&!seen[n]){seen[n]=1;res.push(n);}});return res;}
 // Подсветить прямо в игре кнопку/элемент, чей текст совпадает с правильным ответом.
 function highlightAnswer(){
