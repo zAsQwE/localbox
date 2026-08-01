@@ -197,9 +197,11 @@ class EngineProcess:
         _admins = (_s.get("admin_nicks") or os.environ.get("LOCALBOX_ADMINS") or "").strip()
         if _admins:
             env["LOCALBOX_ADMINS"] = _admins
-            # Показ «правильного ответа» — по настройке (по умолчанию включён).
+            # Показ «правильного ответа» / «цены картины» — по настройке (по умолчанию включены).
             if not _s.get("cheat_answer", True):
                 env["LOCALBOX_CHEAT_ANSWER"] = "0"
+            if not _s.get("cheat_price", True):
+                env["LOCALBOX_CHEAT_PRICE"] = "0"
             self.on_log(f"Читы включены для: {_admins} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).")
         # Фиксированный код комнаты (свой/русский), если задан.
         _code = (_s.get("room_code") or "").strip()

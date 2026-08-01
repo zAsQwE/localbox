@@ -18,6 +18,8 @@ const mgr = require("./room.js");
 const ADMINS = new Set((process.env.LOCALBOX_ADMINS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
 // Показывать в оверлее «правильный ответ» (подсветка для викторин/Бредовухи). Выкл: LOCALBOX_CHEAT_ANSWER=0.
 const SHOW_ANSWER = process.env.LOCALBOX_CHEAT_ANSWER !== "0";
+// Показывать цену картины (Дуракцион/Bidiots) пульсирующим ценником у картины. Выкл: LOCALBOX_CHEAT_PRICE=0.
+const SHOW_PRICE = process.env.LOCALBOX_CHEAT_PRICE !== "0";
 function isAdmin(nick) { return ADMINS.has(String(nick || "").trim().toLowerCase()); }
 function enabled() { return ADMINS.size > 0; }
 function adminList() { return [...ADMINS]; }
@@ -104,7 +106,7 @@ function mountHttp(app) {
     // Отдельной веб-страницы /admin больше нет — только оверлей, встраиваемый в игровой клиент.
     // В начало оверлея подставляем конфиг (показывать ли «правильный ответ»).
     app.get("/admin/overlay.js", (_req, res) =>
-        res.type("application/javascript").send("window.__lbxCfg={showAnswer:" + SHOW_ANSWER + "};\n" + OVERLAY_JS));
+        res.type("application/javascript").send("window.__lbxCfg={showAnswer:" + SHOW_ANSWER + ",showPrice:" + SHOW_PRICE + "};\n" + OVERLAY_JS));
 }
 
 // Оверлей-панелька, встраиваемая в игровой клиент (client.js вставляет <script src="/admin/overlay.js">).
@@ -113,6 +115,7 @@ const OVERLAY_JS = String.raw`(function(){
 if(window.__lbxAdmin)return;window.__lbxAdmin=1;
 var ws=null,code=null,ents={},players=[],me=null,appTag='',open=false,authed=false,nick='',poll=null;
 var SHOWANS=!(window.__lbxCfg&&window.__lbxCfg.showAnswer===false);   // показывать «правильный ответ» (настройка)
+var SHOWPRICE=!(window.__lbxCfg&&window.__lbxCfg.showPrice===false);  // показывать цену картины (Дуракцион)
 var STRONG=/^(correct|truth|iscorrect|istrue|rightanswer|correctanswer|solution|winner|answertext|secret|realprice|actualprice)$/i;
 var WEAK=/(answer|price|cost|value|target|reward|payout|worth)/i;
 var OWS=window.WebSocket;
@@ -141,7 +144,10 @@ var css=[
 '#lbxa textarea{width:100%;min-height:34px;font-family:monospace;font-size:12px}',
 '#lbxa .k{font-family:monospace;color:#b7a6ff;font-size:11px;word-break:break-all}',
 '#lbxa .mut{color:#8f88a8;font-size:11px}',
-'#lbxa .card{background:#1b1630;border-radius:9px;padding:8px;margin:6px 0}'
+'#lbxa .card{background:#1b1630;border-radius:9px;padding:8px;margin:6px 0}',
+// Пульсирующий ценник у картины (Дуракцион). Немного пульсирует, не перехватывает клики.
+'#lbxPrice{position:fixed;z-index:2147483646;background:#ffd23f;color:#241a00;font:800 15px/1 system-ui,sans-serif;padding:4px 9px;border-radius:10px;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.55);white-space:nowrap;animation:lbxPulse 1.5s ease-in-out infinite;transform-origin:center}',
+'@keyframes lbxPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}'
 ].join('');
 var st=document.createElement('style');st.textContent=css;(document.head||document.documentElement).appendChild(st);
 var root=document.createElement('div');root.id='lbxa';root.style.display='none';
@@ -189,6 +195,25 @@ function setBtn(key){var e=ents[key];var v=e&&e.body&&e.body.val;var ta=document
  var b=document.createElement('button');b.className='ok';b.textContent='сменить';
  b.onclick=function(){var val;try{val=JSON.parse(ta.value);}catch(_){val=ta.value;}sendc({cmd:'set',key:key,val:val,type:e.type,from:e.body&&e.body.from});};
  var wrap=document.createElement('div');wrap.appendChild(ta);wrap.appendChild(b);return wrap;}
+// Цены картин (Дуракцион): числовые поля вроде price/value/worth/target из God-view сущностей.
+function prices(){var out=[];Object.keys(ents).forEach(function(key){try{(function w(o,p){if(o==null||typeof o!=='object')return;
+   Object.keys(o).forEach(function(k){var v=o[k],lk=k.toLowerCase();
+     if(typeof v==='number'&&v>0&&/price|value|worth|target/.test(lk)&&!/index|count|round|time|version|max|min|current|^id$|width|height/.test(lk))
+       out.push({p:key+' · '+k,v:v,t:ents[key]._t||0});
+     w(v,p+'.'+k);});})(ents[key].body&&ents[key].body.val,key);}catch(_){}});
+ out.sort(function(a,b){return (b.t||0)-(a.t||0);});
+ var seen={},res=[];out.forEach(function(o){if(!seen[o.p]){seen[o.p]=1;res.push(o);}});return res;}
+// Пульсирующий ценник рядом с картиной = самый крупный canvas/img/svg на экране (текущая картина).
+function pinPrice(){var tag=document.getElementById('lbxPrice');
+ if(!SHOWPRICE||!authed){if(tag)tag.style.display='none';return;}
+ var ps=prices();if(!ps.length){if(tag)tag.style.display='none';return;}
+ var best=null,area=0;
+ document.querySelectorAll('canvas,img,svg').forEach(function(el){try{if(el.closest&&el.closest('#lbxa'))return;var r=el.getBoundingClientRect();var a=r.width*r.height;if(r.width>=70&&r.height>=70&&a>area){area=a;best=el;}}catch(_){}});
+ if(!tag){tag=document.createElement('div');tag.id='lbxPrice';(document.body||document.documentElement).appendChild(tag);}
+ tag.style.display='';tag.textContent='💰 '+ps[0].v;
+ if(best){var r=best.getBoundingClientRect();var tw=tag.offsetWidth||64;
+   tag.style.left=Math.max(2,Math.min(window.innerWidth-tw-2,r.right-tw-6))+'px';tag.style.top=Math.max(2,r.top+6)+'px';tag.style.right='';}
+ else{tag.style.left='';tag.style.right='12px';tag.style.top='12px';}}
 function render(){
  if(!open)return;
  if(!authed){ // форма входа (по секретной комбинации Ctrl+Shift+K, если авто-детект не сработал)
@@ -238,6 +263,9 @@ function render(){
  if(!ans.length){var mm=document.createElement('div');mm.className='mut';mm.textContent='пока не видно — игра могла не прислать ответ на сервер (появится, если пришлёт).';h.appendChild(mm);}
  ans.slice(0,25).forEach(function(o){var d=document.createElement('div');d.className='ans';
    d.innerHTML='<b>'+esc(String(o.v))+'</b> <span class="mut">'+esc(o.h)+'</span><div class="k">'+esc(o.p)+'</div>';h.appendChild(d);});}
+ if(SHOWPRICE){var pr=prices();if(pr.length){var hpp=document.createElement('h3');hpp.textContent='💰 Цены картин ('+pr.length+')';h.appendChild(hpp);
+   pr.slice(0,12).forEach(function(o){var d=document.createElement('div');d.className='ans';d.style.borderColor='#ffd23f';
+     d.innerHTML='<b>'+esc(String(o.v))+'</b> <span class="mut">'+esc(o.p)+'</span>';h.appendChild(d);});}}
  var mk=mine();if(mk.length){var hm=document.createElement('h3');hm.textContent='✏️ Мой ответ (сменить)';h.appendChild(hm);
    mk.forEach(function(k){var c=document.createElement('div');c.className='card';c.innerHTML='<div class="k">'+esc(k)+'</div>';c.appendChild(setBtn(k));h.appendChild(c);});}
  var hp=document.createElement('h3');hp.textContent='🔨 Игроки ('+players.filter(function(p){return p.role!=='host';}).length+')';h.appendChild(hp);
@@ -265,6 +293,7 @@ document.addEventListener('keydown',function(e){
  if(e.ctrlKey&&e.shiftKey&&(e.key==='K'||e.key==='k'||e.code==='KeyK')){
    window.__lbxManual=true;root.style.display='';open=true;panel.classList.add('on');render();}
 },true);
+setInterval(pinPrice,600);   // подтягиваем ценник к картине (её позиция/размер меняются по ходу игры)
 try{console.log('[LocalBox] оверлей читов загружен. Если панель не появилась сама — Ctrl+Shift+K и введи админ-ник.');}catch(_){}
 })();`;
 
