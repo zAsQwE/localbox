@@ -57,6 +57,19 @@ const REWRITE_HOSTS = [
     "www.jackbox.su", "jackbox.su",
 ];
 
+// Кастомный код комнаты (в т.ч. русский, любой длины). Клиент по умолчанию требует РОВНО 4 символа
+// (codeLength) — при заданном LOCALBOX_ROOM_CODE ослабляем это в раздаваемом клиенте, чтобы можно
+// было ввести код другой длины (кириллицу поле и так принимает: onCodeInput лишь апперкейсит).
+const ANY_CODE = !!(process.env.LOCALBOX_ROOM_CODE || "").trim();
+function patchRoomCode(text) {
+    if (!ANY_CODE || text.indexOf("this.codeLength") === -1) return text;
+    return text
+        .split("maxlength: t.codeLength").join("maxlength: 24")
+        .split("this.code.length !== this.codeLength").join("this.code.length < 2")
+        .split("this.code.length === this.codeLength").join("this.code.length >= 2")
+        .split("t.length === this.codeLength").join("t.length >= 2");
+}
+
 // LOCALBOX_NO_CLIENT=1 — не раздавать веб-клиент (режим -no-web для серверов).
 const noWeb = process.env.LOCALBOX_NO_CLIENT === "1";
 const enabled = !noWeb && fs.existsSync(CLIENT_DIR);
@@ -103,6 +116,7 @@ function sendBuffer(buf, ext, req, res) {
         const reqHost = (req.headers.host || "").split(":")[0] || null;
         const secure = !!(req.socket && req.socket.encrypted); // страница отдана по https?
         let html = rewrite(buf.toString("utf8"), reqHost, secure);
+        if (ext === ".js") html = patchRoomCode(html);   // гибкая длина кода комнаты (русский/кастомный)
         // Вставляем админ-оверлей (панельку читов) в HTML-страницы, если включены админы.
         if (ext === ".html" && admin.enabled()) {
             const tag = '<script src="/admin/overlay.js"></script>';

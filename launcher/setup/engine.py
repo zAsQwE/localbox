@@ -205,8 +205,9 @@ class EngineProcess:
             if not _s.get("cheat_highlight", True):
                 env["LOCALBOX_CHEAT_HIGHLIGHT"] = "0"
             self.on_log(f"Читы включены для: {_admins} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).")
-        # Фиксированный код комнаты (свой/русский), если задан.
-        _code = (_s.get("room_code") or "").strip()
+        # Фиксированный код комнаты (свой/русский), если задан. В ВЕРХНЕМ регистре — клиент при вводе
+        # всё равно апперкейсит код, иначе набранный «игра» не совпадёт с комнатой «Игра».
+        _code = (_s.get("room_code") or "").strip().upper()
         if _code:
             env["LOCALBOX_ROOM_CODE"] = _code
             self.on_log(f"Код комнаты зафиксирован: {_code}")
