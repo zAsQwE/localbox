@@ -80,12 +80,16 @@ app.get("/api/v2/app-configs/:appTag", (req, res) => {
 app.get("/api/v2/rooms/:code", (req, res) => {
     const room = mgr.get(req.params.code);
     if (!room) return res.status(404).send({ ok: false, error: "no such room" });
+    // host — АДРЕС, ПО КОТОРОМУ ИГРОК К НАМ ДОСТУЧАЛСЯ (Host-заголовок), а не фиксированный serverUrl.
+    // Клиент подключается к room.host, поэтому каждый должен идти туда, откуда пришёл: Porthole-друг —
+    // на свой localhost (порт проброшен Steam-прокси), LAN-игрок — на LAN-IP, локальный — на localhost.
+    const reqHost = (req.headers.host || serverUrl);
     res.send({
         ok: true,
         body: {
             appId: room.appId, appTag: room.appTag,
             audienceEnabled: room.audienceEnabled,
-            code: room.code, host: serverUrl, audienceHost: serverUrl,
+            code: room.code, host: reqHost, audienceHost: reqHost,
             locked: room.locked, full: room.isFull(),
             maxPlayers: room.maxPlayers, minPlayers: room.minPlayers,
             moderationEnabled: !!room.moderatorPassword,
