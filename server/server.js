@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const https = require("https");
+const crypto = require("crypto");
 const express = require("express");
 const { WebSocketServer } = require("ws");
 
@@ -19,13 +20,24 @@ const state = require("./lib/state.js");
 const tts = require("./lib/tts.js");
 const render = require("./lib/render.js");
 const admin = require("./lib/admin.js");
+const localbox = require("./lib/localbox.js");
+const network = require("./lib/network.js");
+const QRCode = require("qrcode");
 
-const config = JSON.parse(fs.readFileSync(__dirname + "/config.json", "utf8"));
+let config;
+try { config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8")); }
+catch (e) { console.error("Не удалось прочитать server/config.json: " + e.message + ". Запустите лаунчер для настройки сервера."); process.exit(1); }
+if (!config || !config.ssl || !config.ssl.cert || !config.ssl.key) {
+    console.error("В server/config.json не заданы ssl.cert и ssl.key. Запустите лаунчер для настройки сервера."); process.exit(1);
+}
 state.serverUrl = config.serverUrl || "localhost";
 render.setState(state);
 render.logStatus();   // печатает статус Додо Ре Ми (ffmpeg/бэкинги), если поддержка включена
-mgr.setAdminHook(admin.onRoomEvent);   // God view: события комнат → админ-панель
-if (admin.enabled()) console.log("[admin] читы включены для ников: " + admin.adminList().join(", ") + " · панель: https://" + state.serverUrl + "/admin");
+mgr.setAdminHook((code, event) => {
+    admin.onRoomEvent(code, event);       // God view: события комнат → админ-панель
+    localbox.onRoomEvent(mgr, code, event);
+});
+if (admin.enabled()) console.log("[admin] читы включены для ников: " + admin.adminList().join(", ") + " · панель встроена в игровой клиент");
 // Таблица игр appId<->appTag + лимиты (нужна, чтобы комната сообщала клиенту верный appTag).
 try {
     const gj = JSON.parse(fs.readFileSync(__dirname + "/games.json", "utf8"));
@@ -36,6 +48,7 @@ const serverUrl = state.serverUrl;
 // Кастомный код комнаты (вместо случайного) — задаётся в лаунчере. Пусто = случайный код.
 const ROOM_CODE = (process.env.LOCALBOX_ROOM_CODE || "").trim();
 if (ROOM_CODE) console.log("[room] код комнаты фиксирован: " + ROOM_CODE);
+if (localbox.AUTO_START_FULL) console.log("[room] автостарт включён: игра начнётся при заполнении комнаты");
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -81,7 +94,7 @@ app.get("/api/v2/rooms/:code", (req, res) => {
     const room = mgr.get(req.params.code);
     if (!room) return res.status(404).send({ ok: false, error: "no such room" });
     // host — АДРЕС, ПО КОТОРОМУ ИГРОК К НАМ ДОСТУЧАЛСЯ (Host-заголовок), а не фиксированный serverUrl.
-    // Клиент подключается к room.host, поэтому каждый должен идти туда, откуда пришёл: Porthole-друг —
+    // Клиент подключается к room.host, поэтому каждый должен идти туда, откуда пришёл: удалённый игрок —
     // на свой localhost (порт проброшен Steam-прокси), LAN-игрок — на LAN-IP, локальный — на localhost.
     const reqHost = (req.headers.host || serverUrl);
     res.send({
@@ -105,7 +118,7 @@ app.post("/tts/generate", async (req, res) => {
     if (!b.text) return res.status(400).send({ success: false, error: "missing required parameter: text" });
     try {
         const name = await tts.generate(b.text, b.voice, b.rate);
-        res.send({ success: true, url: "https://" + serverUrl + "/tts/" + name });
+        res.send({ success: true, url: network.origin(req, serverUrl) + "/tts/" + name });
     } catch (e) {
         res.status(500).send({ success: false, error: String(e && e.message || e) });
     }
@@ -123,6 +136,47 @@ app.get("/render/:file", (req, res) => {
     if (!fs.existsSync(f)) return res.sendStatus(404);
     res.type("audio/mpeg");
     fs.createReadStream(f).on("error", () => res.sendStatus(404)).pipe(res);
+});
+
+// Read-only certificate information. LocalBox does not install this CA into trust stores.
+function publicCaPath() {
+    return path.join(__dirname, "..", "certs", "localbox-rootCA.pem");
+}
+function sendPublicCa(req, res) {
+    const f = publicCaPath();
+    if (!fs.existsSync(f)) return res.sendStatus(404);
+    const filename = req.path.endsWith(".crt") ? "localbox-ca.crt" : "localbox-ca.pem";
+    res.type("application/x-x509-ca-cert").set("Content-Disposition", `attachment; filename="${filename}"`);
+    fs.createReadStream(f).on("error", () => res.sendStatus(404)).pipe(res);
+}
+app.get(["/localbox-ca.pem", "/localbox-ca.crt"], sendPublicCa);
+app.get("/localbox-ca", (_req, res) => {
+    const f = publicCaPath();
+    if (!fs.existsSync(f)) return res.sendStatus(404);
+    let fingerprint = "";
+    try { fingerprint = new crypto.X509Certificate(fs.readFileSync(f)).fingerprint256; } catch { /* invalid CA */ }
+    res.type("html").send(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CA LocalBox</title><style>body{font:18px system-ui;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.5}a{display:inline-block;padding:12px 18px;background:#6757e8;color:white;border-radius:8px;text-decoration:none}code{word-break:break-all}</style><h1>Сертификат LocalBox</h1><p>Публичный сертификат хранится в папке LocalBox. Приложение не добавляет его в доверие системы, браузера или Steam.</p><p><a href="/localbox-ca.crt">Скачать localbox-ca.crt</a></p><p>SHA-256: <code>${fingerprint || "недоступен"}</code></p><p>Закрытого ключа в этом файле нет.</p></html>`);
+});
+
+// Состояние активной комнаты для QR-оверлея лаунчера.
+// QR открывает HTTPS-клиент с кодом комнаты в параметрах ссылки.
+function activeRoom() {
+    return mgr.list().filter((room) => !room.closed && room.host && room.host.connected)
+        .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+}
+app.get("/localbox/status", (_req, res) => {
+    res.set("Cache-Control", "no-store").send({ ok: true, room: localbox.roomStatus(activeRoom(), serverUrl) });
+});
+app.get("/localbox/qr.png", async (req, res) => {
+    const room = req.query.code ? mgr.get(String(req.query.code).toUpperCase()) : activeRoom();
+    const status = localbox.roomStatus(room, serverUrl);
+    if (!status) return res.status(404).send({ ok: false, error: "no active room" });
+    try {
+        const png = await QRCode.toBuffer(status.joinUrl, { type: "png", errorCorrectionLevel: "M", margin: 2, width: 256 });
+        res.type("png").set("Cache-Control", "no-store").send(png);
+    } catch (error) {
+        res.status(500).send({ ok: false, error: String(error && error.message || error) });
+    }
 });
 
 // прочие маршруты клиента
@@ -153,35 +207,35 @@ const wss = new WebSocketServer({ noServer: true });
 
 function onUpgrade(request, socket, head) {
     const [reqPath, qs] = request.url.split("?");
+    const query = Object.fromEntries(new URLSearchParams(qs || ""));
     console.log("[ws] апгрейд:", reqPath, qs ? "?" + qs : "");
     // Админ-панель: /admin/ws?nick=...
     if (reqPath === "/admin/ws") {
-        const q = {};
-        (qs || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) q[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); });
-        wss.handleUpgrade(request, socket, head, (client) => admin.handleWs(client, q));
+        wss.handleUpgrade(request, socket, head, (client) => admin.handleWs(client, query));
         return;
     }
     // Blobcast: socket.io 0.9 — /socket.io/1/websocket/<token>
     if (/^\/socket\.io\/1\/websocket\/[0-9a-f]+$/.test(reqPath)) {
-        wss.handleUpgrade(request, socket, head, (client) => handleBlobcast(client));
+        wss.handleUpgrade(request, socket, head, (client) => {
+            client.localboxAddress = network.address(request, serverUrl);
+            handleBlobcast(client);
+        });
         return;
     }
     // Ecast: /api/v2/rooms/CODE/play. Код — не только 4 латинские буквы: поддерживаем кастомный
     // код комнаты (LOCALBOX_ROOM_CODE), в т.ч. не-ASCII (в URL он percent-encoded → декодируем).
     const m = reqPath.match(/^\/api\/v2\/(?:rooms|audience)\/([^/]+)\/play$/);
     if (!m) { console.log("[ws] апгрейд ОТКЛОНЁН (путь не распознан):", reqPath); socket.destroy(); return; }
-    let code; try { code = decodeURIComponent(m[1]); } catch { code = m[1]; }
-    const query = {};
-    (qs || "").split("&").forEach((kv) => {
-        const i = kv.indexOf("=");
-        if (i > 0) query[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+    let code; try { code = decodeURIComponent(m[1]); } catch { socket.destroy(); return; }
+    wss.handleUpgrade(request, socket, head, (client) => {
+        client.localboxAddress = network.address(request, serverUrl);
+        handleConnection(client, code, query);
     });
-    wss.handleUpgrade(request, socket, head, (client) => handleConnection(client, code, query));
 }
 
 let servers = [];
 try {
-    const ssl = { cert: fs.readFileSync(__dirname + "/" + config.ssl.cert), key: fs.readFileSync(__dirname + "/" + config.ssl.key) };
+    const ssl = { cert: fs.readFileSync(path.resolve(__dirname, config.ssl.cert)), key: fs.readFileSync(path.resolve(__dirname, config.ssl.key)) };
     servers = [
         { s: http.createServer(app), port: 80 },
         { s: https.createServer(ssl, app), port: 443 },
@@ -194,13 +248,28 @@ try {
 }
 
 let boundPorts = 0;
+const recentTlsErrors = new Map();
 servers.forEach(({ s, port }) => {
     s.on("upgrade", onUpgrade);
     // Диагностика: если хост/клиент пытается подключиться, но рвётся на TLS (недоверенный
     // самоподписанный серт) — обычный лог запросов это не покажет. Логируем такие обрывы.
     s.on("tlsClientError", (err, sock) => {
         const ip = sock && sock.remoteAddress;
-        if (err && !/ECONNRESET|EPIPE/.test(err.code || "")) console.error("[tls] обрыв на TLS (порт " + port + ", от " + ip + "): " + (err.message || err.code));
+        if (!err || /ECONNRESET|EPIPE/.test(err.code || "")) return;
+        // Plain HTTP on an HTTPS port is a client typo/health probe, not a certificate failure.
+        if (/http request/i.test(err.message || "")) return;
+        // A game retries failed TLS handshakes several times per second. Keep one actionable
+        // message per source/error instead of flooding the launcher log.
+        const message = err.message || err.code;
+        const key = `${port}:${ip || "unknown"}:${err.code || message}`;
+        const now = Date.now();
+        if (now - (recentTlsErrors.get(key) || 0) < 10000) return;
+        recentTlsErrors.set(key, now);
+        if (/unknown ca/i.test(message)) {
+            console.error(`[tls] клиент ${ip || "?"} отклонил локальный сертификат; хранилища доверия не изменяются. В браузере можно подтвердить исключение, если оно доступно; игровой клиент со строгой проверкой TLS может не подключиться`);
+        } else {
+            console.error("[tls] обрыв на TLS (порт " + port + ", от " + ip + "): " + message);
+        }
     });
     s.on("clientError", (err, sock) => { try { sock.destroy(); } catch { /* ignore */ } });
     s.on("error", (err) => {
@@ -214,5 +283,5 @@ servers.forEach(({ s, port }) => {
 });
 // Если через 3с не занялся ни один порт — сообщаем внятно.
 setTimeout(() => {
-    if (boundPorts === 0) console.error("Ни один порт не занят. На Android без root дайте права (setcap) или используйте другой порт.");
+    if (boundPorts === 0) { console.error("Не удалось открыть ни один порт сервера. Проверьте права и занятые порты."); process.exit(1); }
 }, 3000);

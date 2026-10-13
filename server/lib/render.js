@@ -17,7 +17,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
 const { execFile } = require("child_process");
 
 const RENDER_DIR = path.join(__dirname, "..", "render");
@@ -46,24 +45,15 @@ const { FFMPEG, SOURCE: FFMPEG_SOURCE } = require("./ffmpeg.js");
 // ---- сэмплы ----
 
 // Скачивает файл с cdn в dest (если ещё нет). Возвращает Promise<bool>.
-function fetchSample(slug, name, dest) {
-    return new Promise((resolve) => {
-        if (fs.existsSync(dest)) return resolve(true);
-        const url = CDN + "/" + slug + "/" + name + EXT;
-        https.get(url, (res) => {
-            if (res.statusCode !== 200) { res.resume(); return resolve(false); }
-            fs.mkdirSync(path.dirname(dest), { recursive: true });
-            const tmp = dest + ".part";
-            const ws = fs.createWriteStream(tmp);
-            res.pipe(ws);
-            ws.on("finish", () => ws.close(() => { try { fs.renameSync(tmp, dest); resolve(true); } catch { resolve(false); } }));
-            ws.on("error", () => resolve(false));
-        }).on("error", () => resolve(false));
-    });
+async function fetchSample(slug, name, dest) {
+    if (fs.existsSync(dest)) return true;
+    const url = CDN + "/" + encodeURIComponent(slug) + "/" + encodeURIComponent(name) + EXT;
+    return (await require("./download.js")(url, dest)).ok;
 }
 
 // Локальный путь к сэмплу; если нет — качает. Возвращает Promise<path|null>.
 async function ensureSample(slug, name) {
+    if (![slug, name].every((s) => typeof s === "string" && s.length && !/[\\/\0:]/.test(s) && s !== "." && s !== "..")) return null;
     const dest = path.join(INSTR_DIR, slug, name + EXT);
     if (fs.existsSync(dest)) return dest;
     return (await fetchSample(slug, name, dest)) ? dest : null;
@@ -231,7 +221,9 @@ async function synth(payload, id) {
 
     // 3) бэкинг песни (локаль-специфичный, иначе базовый)
     const locale = payload.locale || "en";
-    const songDir = path.join(SONGS_DIR, payload.songSlug || (perfs[0] && perfs[0].songSlug) || "");
+    const songSlug = payload.songSlug || (perfs[0] && perfs[0].songSlug) || "";
+    if (!/^[a-zA-Z0-9_-]*$/.test(songSlug) || !/^[a-zA-Z0-9_-]+$/.test(locale)) throw new Error("Invalid song or locale");
+    const songDir = path.join(SONGS_DIR, songSlug);
     let backing = null;
     for (const cand of ["backing_" + locale + ".ogg", "backing.ogg", "backing_en.ogg"]) {
         if (fs.existsSync(path.join(songDir, cand))) { backing = path.join(songDir, cand); break; }
@@ -248,8 +240,9 @@ async function synth(payload, id) {
     // wav, затем одной маленькой командой сводим все батчи (+ бэкинг) в финальный mp3.
     fs.mkdirSync(OUT_DIR, { recursive: true });
     const out = path.join(OUT_DIR, id + ".mp3");
-    const INSTR_GAIN = parseFloat(process.env.LOCALBOX_RENDER_INSTR || "4") || 4;
-    const BACK_VOL = parseFloat(process.env.LOCALBOX_RENDER_BACKING || "0.45") || 0.45;
+    const gain = (value, fallback) => Number.isFinite(Number(value)) && value !== "" && value != null ? Math.max(0, Number(value)) : fallback;
+    const INSTR_GAIN = gain(process.env.LOCALBOX_RENDER_INSTR, 4);
+    const BACK_VOL = gain(process.env.LOCALBOX_RENDER_BACKING, 0.45);
     // Windows идёт через cmd.exe (см. runFfmpeg) — там лимит длины строки ~8191, поэтому мельче.
     // На Unix прямой спавн (лимит ~2 МБ) — можно крупнее.
     const BATCH = process.platform === "win32" ? 20 : 60;
@@ -302,10 +295,9 @@ async function synth(payload, id) {
             };
             try {
                 if (process.platform === "win32") {
-                    const bat = path.join(OUT_DIR, "_ff_" + process.pid + "_" + (batSeq++) + ".bat");
-                    // Если путь к ffmpeg не-ASCII — зовём по голому имени (cmd сам найдёт в PATH, не тащим
-                    // кириллицу в .bat); иначе явный путь — уважаем свой runtime/ffmpeg.exe.
-                    const ffInvoke = /[^\x00-\x7F]/.test(String(FFMPEG || "")) ? "ffmpeg" : cq(FFMPEG);
+                    const bat = path.join(OUT_DIR, "_ff_" + id + "_" + process.pid + "_" + (batSeq++) + ".bat");
+                    // UTF-8 batch retains the selected absolute path, including bundled runtimes.
+                    const ffInvoke = cq(FFMPEG);
                     const cmdline = ffInvoke + " " + args.map(cq).join(" ");
                     fs.writeFileSync(bat, "@echo off\r\nchcp 65001>nul\r\n" + cmdline + "\r\n", "utf8");
                     execFile("cmd", ["/d", "/s", "/c", cq(bat)], { maxBuffer: 64 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: true }, (err, _o, stderr) => {
@@ -349,8 +341,9 @@ async function synth(payload, id) {
         if (i < batches.length - 1) await sleep(60);
     }
     const okBatchFiles = batchFiles.filter((f, i) => batchResults[i].ok && fs.existsSync(f));
-    const cleanupBatches = () => okBatchFiles.forEach((f) => { try { fs.unlinkSync(f); } catch { /* ignore */ } });
+    const cleanupBatches = () => batchFiles.forEach((f) => { try { fs.unlinkSync(f); } catch { /* ignore */ } });
     if (!okBatchFiles.length) {
+        cleanupBatches();
         console.log("[render] ни один батч ffmpeg не собрался: " + (batchResults.find((r) => !r.ok) || {}).tail);
         return null;
     }
@@ -388,7 +381,7 @@ function dbToLin(db) { return Math.pow(10, db / 20); }
 // ---- точка входа: external-request/create ----
 
 // Поддержка Додо Ре Ми включается флагом окружения LOCALBOX_DODO=1 (из настроек лаунчера или
-// из start-server.bat). Без него запросы рендера просто подтверждаются и пропускаются.
+// из start-server.bat). Без него запросы получают статус error, чтобы игра не ждала бесконечно.
 function dodoEnabled() { return process.env.LOCALBOX_DODO === "1"; }
 
 // Что есть для рендера: ffmpeg + сколько песенных бэкингов лежит локально.
@@ -431,18 +424,23 @@ function handleExternalRequest(client, room, msg) {
 
     client.sendOk(msg.seq);
     if (!key.startsWith("render") || !p.payload) return;
+    const acl = Array.isArray(p.acl) ? p.acl : ["rw role:host"];
+    const fail = () => {
+        room.setEntity("external-request", key, acl, { val: { service: p.service, status: "error", progress: 1, response: null } });
+        room.notify(key, true, null);
+    };
 
     if (!dodoEnabled()) {
         if (!warnedOff) { console.log("[dodo] пришёл запрос рендера, но поддержка Додо Ре Ми ВЫКЛючена — пропускаю. Включи её в настройках лаунчера или запусти сервер «с поддержкой Додо Ре Ми» (start-server.bat)."); warnedOff = true; }
+        fail();
         return;
     }
-    if (!FFMPEG) { console.log("[dodo] ⚠ нет ffmpeg — рендер невозможен. Поставь ffmpeg (в PATH) или положи в " + require("./ffmpeg.js").RUNTIME_DIR + "."); return; }
+    if (!FFMPEG) { console.log("[dodo] ⚠ нет ffmpeg — рендер невозможен. Поставь ffmpeg (в PATH) или положи в " + require("./ffmpeg.js").RUNTIME_DIR + "."); fail(); return; }
 
     console.log("[render] запрос: key=" + key + " service=" + (p.service || "?") + " acl=" + JSON.stringify(p.acl || null));
 
     try { fs.mkdirSync(RENDER_DIR, { recursive: true }); fs.writeFileSync(path.join(RENDER_DIR, "last-render-payload.json"), JSON.stringify(p.payload, null, 2)); } catch {}
 
-    const acl = p.acl && p.acl.length ? p.acl : ["rw role:host"];
     // ВАЖНО (разобрано из NopusOpus.swf): хост парсит апдейт как ecast-сообщение с opcode
     // "external-request" → new ExternalRequest(key, from, val.service, val.status, val.response,
     // val.progress). А в Playback: if status=="success" -> берёт response.gameRenderUrl и качает.
@@ -452,7 +450,9 @@ function handleExternalRequest(client, room, msg) {
     room.notify(key, true, null);
 
     const id = "r" + Date.now() + "_" + (++counter);
+    const pending = room.entities[key];
     synth(p.payload, id).then((mp3) => {
+        if (room.closed || room.entities[key] !== pending) return;
         if (!mp3) {
             console.log("[render] рендер не удался — статус error");
             room.setEntity("external-request", key, acl, { val: { service: p.service, status: "error", progress: 1, response: null } });
@@ -467,7 +467,12 @@ function handleExternalRequest(client, room, msg) {
         };
         room.setEntity("external-request", key, acl, { val });
         room.notify(key, true, null);
-    }).catch((e) => console.log("[render] исключение: " + (e && e.message)));
+    }).catch((e) => {
+        console.log("[render] исключение: " + (e && e.message));
+        if (room.closed || room.entities[key] !== pending) return;
+        room.setEntity("external-request", key, acl, { val: { service: p.service, status: "error", progress: 1, response: null } });
+        room.notify(key, true, null);
+    });
 }
 
 module.exports = { handleExternalRequest, setState, synth, readiness, logStatus, OUT_DIR, RENDER_DIR };

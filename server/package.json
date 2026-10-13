@@ -6,10 +6,12 @@
     "private": true,
     "main": "server.js",
     "scripts": {
-        "start": "node server.js"
+        "start": "node server.js",
+        "test": "node --test"
     },
     "dependencies": {
         "express": "^4.19.2",
+        "qrcode": "^1.5.4",
         "ws": "^8.18.0",
         "yjs": "^13.6.31"
     }

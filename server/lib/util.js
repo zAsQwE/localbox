@@ -7,7 +7,7 @@
 //
 
 const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const HEX = "0123456789abcdef";
+const { randomBytes } = require("crypto");
 
 function randInt(min, max) { return Math.floor(Math.random() * (max - min) + min); }
 
@@ -18,17 +18,15 @@ function makeCode() {
 }
 
 function makeToken(len = 24) {
-    let s = "";
-    for (let i = 0; i < len; i++) s += HEX[Math.floor(Math.random() * HEX.length)];
-    return s;
+    return randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
 }
 
 // ACL — список строк: "rw *", "r role:audience", "rw id:5".
 // Возвращает распарсенные правила [{read, write, to, id}].
 function parseAcl(list) {
     const rules = [];
-    (list || []).forEach((item) => {
-        const parts = String(item).split(" ");
+    (Array.isArray(list) ? list : []).forEach((item) => {
+        const parts = String(item).trim().split(/\s+/);
         if (parts.length !== 2) return;
         const flags = parts[0], target = parts[1];
         const rule = { read: flags.indexOf("r") !== -1, write: flags.indexOf("w") !== -1, to: "", id: null };

@@ -5,7 +5,7 @@
 
 const state = {
     serverUrl: "localhost",
-    games: { appTags: {}, appIds: {}, maxPlayers: {}, minPlayers: {} },
+    games: Object.fromEntries(["appTags", "appIds", "maxPlayers", "minPlayers"].map((key) => [key, Object.create(null)])),
 
     // Регистрирует игру (auto-register неизвестных). Возвращает appTag.
     register(p) {

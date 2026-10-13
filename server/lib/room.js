@@ -20,6 +20,9 @@ function entityContent(e) {
         case "text": return { val: e.val };
         case "doodle": return { val: e.val };
         case "text-map": return { root: textmap.root(e.doc) };
+        case "audience/count-group": return { choices: e.choices };
+        case "audience/text-ring": return { elements: e.elements };
+        case "audience/g-counter": case "audience/pn-counter": return { count: e.count };
         default: return e.val !== undefined ? { val: e.val } : {};
     }
 }
@@ -31,6 +34,8 @@ class Room {
         this.appTag = params.appTag;
         this.appId = (g.appTags && g.appTags[params.appTag]) || params.appId || params.appTag;
         this.code = params.forceRoomId || u.makeCode();
+        if (!params.forceRoomId) while (rooms[this.code]) this.code = u.makeCode();
+        this.closed = false;
         this.token = u.makeToken();
         this.locked = false;
         this.audienceEnabled = !!params.audienceEnabled;
@@ -43,14 +48,14 @@ class Room {
         this.hostUserId = params.userId || null;
         this.pc = 0;
         this.nextProfileId = 1;
-        this.entities = {};      // key -> {type, acl:[parsed], version, from, ...content}
+        this.entities = Object.create(null); // keys may include __proto__ or constructor
         this.host = null;        // {profileId, userId, name, client, connected}
-        this.players = {};       // profileId -> {profileId, userId, name, role, client, connected, banned}
+        this.players = Object.create(null);
         this.audienceCount = 0;
         this.banned = [];
         this.createdAt = Date.now();
-        this.audienceClients = {}; // clientId -> ws client
-        this._audiencePush = {};   // key -> таймер троттлинга рассылки зрителям
+        this.audienceClients = Object.create(null);
+        this._audiencePush = Object.create(null);
         this.blobcast = false;     // true, если хост — старая игра (Blobcast): игрокам нужен bc:customer
         this.muted = new Set();    // profileId заглушённых игроков (админ-мьют) — их правки игнорируются
     }
@@ -64,6 +69,7 @@ class Room {
     isFull() { return this.playerCount() >= this.maxPlayers; }
 
     findByUserId(userId) {
+        if (userId == null) return null;
         if (this.host && this.host.userId === userId) return this.host;
         return Object.values(this.players).find((p) => p.userId === userId) || null;
     }
@@ -151,8 +157,9 @@ class Room {
     }
 
     createEntity(type, key, aclRaw, content) {
+        if (this.entities[key] && this.entities[key].doc) this.entities[key].doc.destroy();
         this.entities[key] = Object.assign(
-            { type, acl: u.parseAcl(aclRaw && aclRaw.length ? aclRaw : ["r *"]), version: 1, from: null },
+            { type, acl: u.parseAcl(aclRaw != null ? aclRaw : ["r *"]), version: 1, from: null },
             content
         );
         return true;
@@ -162,8 +169,9 @@ class Room {
         const version = prev ? prev.version + 1 : 1;
         // ACL: если явно не задан при set — СОХРАНЯЕМ прежний (иначе сброс на "r *" делает
         // приватные сущности вроде audiencePlayer видимыми игрокам → игра считает игрока зрителем).
-        const acl = (aclRaw && aclRaw.length) ? u.parseAcl(aclRaw)
+        const acl = aclRaw != null ? u.parseAcl(aclRaw)
             : (prev ? prev.acl : u.parseAcl(["r *"]));
+        if (prev && prev.doc) prev.doc.destroy();
         this.entities[key] = Object.assign(
             { type, acl, version, from: null },
             content
@@ -181,8 +189,10 @@ class Room {
     incrementEntity(key, times, fromProfileId) {
         const e = this.entities[key];
         if (!e || e.type !== "number") return false;
-        const step = (times != null ? times : (e.restrictions && e.restrictions.increment)) || 1;
+        const step = times != null ? times : ((e.restrictions && e.restrictions.increment) || 1);
+        if (!Number.isFinite(step) || !Number.isFinite(e.val) || !Number.isFinite(e.val + step)) return false;
         e.val += step;
+        if (e.restrictions && e.restrictions.min !== undefined && e.val < e.restrictions.min) e.val = e.restrictions.min;
         if (e.restrictions && e.restrictions.max !== undefined && e.val > e.restrictions.max) e.val = e.restrictions.max;
         e.version += 1; e.from = fromProfileId != null ? fromProfileId : e.from;
         return true;
@@ -190,24 +200,33 @@ class Room {
     decrementEntity(key, times, fromProfileId) {
         const e = this.entities[key];
         if (!e || e.type !== "number") return false;
-        const step = (times != null ? times : (e.restrictions && e.restrictions.increment)) || 1;
+        const step = times != null ? times : ((e.restrictions && e.restrictions.increment) || 1);
+        if (!Number.isFinite(step) || !Number.isFinite(e.val) || !Number.isFinite(e.val - step)) return false;
         e.val -= step;
+        if (e.restrictions && e.restrictions.max !== undefined && e.val > e.restrictions.max) e.val = e.restrictions.max;
         if (e.restrictions && e.restrictions.min !== undefined && e.val < e.restrictions.min) e.val = e.restrictions.min;
         e.version += 1; e.from = fromProfileId != null ? fromProfileId : e.from;
         return true;
     }
-    drop(key) { delete this.entities[key]; emitAdmin(this.code, { t: "drop", key }); }
+    drop(key) {
+        const e = this.entities[key];
+        if (e && e.doc) e.doc.destroy();
+        clearTimeout(this._audiencePush[key]);
+        delete this._audiencePush[key];
+        delete this.entities[key];
+        emitAdmin(this.code, { t: "drop", key });
+    }
 
     // ---- админ-действия (читы) ----
-    kick(profileId, ban) {
+    kick(profileId, ban, reason = "admin") {
         const p = this.players[profileId];
         if (!p) return false;
         if (ban && p.userId && this.banned.indexOf(p.userId) === -1) this.banned.push(p.userId);
         try { this.sendTo(profileId, { opcode: "room/exit", result: { cause: ban ? 4 : 5 } }); } catch { /* ignore */ }
-        try { if (p.client) p.client.close(1000); } catch { /* ignore */ }
-        this.sendToHost({ opcode: "client/kicked", result: { id: profileId, role: p.role, reason: "admin", banned: !!ban } });
-        this.sendToHost({ opcode: "client/disconnected", result: { id: profileId, role: p.role } });
         delete this.players[profileId];
+        try { if (p.client) p.client.close(1000); } catch { /* ignore */ }
+        this.sendToHost({ opcode: "client/kicked", result: { id: profileId, role: p.role, reason, banned: !!ban } });
+        this.sendToHost({ opcode: "client/disconnected", result: { id: profileId, role: p.role } });
         this.muted.delete(profileId);
         emitAdmin(this.code, { t: "players" });
         return true;
@@ -226,7 +245,7 @@ class Room {
     createTextMap(key, aclRaw, initialText) {
         this.entities[key] = {
             type: "text-map",
-            acl: u.parseAcl(aclRaw && aclRaw.length ? aclRaw : ["rw *"]),
+            acl: u.parseAcl(aclRaw != null ? aclRaw : ["rw *"]),
             version: 1, from: null,
             doc: textmap.create(initialText),
         };
@@ -236,6 +255,7 @@ class Room {
         const e = this.entities[key];
         if (!e || e.type !== "text-map") return false;
         const ok = textmap.applyUpdate(e.doc, b64);
+        if (!ok) return false;
         e.version += 1; e.from = fromProfileId != null ? fromProfileId : e.from;
         return ok;
     }
@@ -249,6 +269,15 @@ class Room {
     // ---- подключение / отключение ----
     // Возвращает welcome-объект (или null при неуспехе, тогда уже отправлена ошибка через client.sendError).
     connect(client, userId, name, role, server = "ecast") {
+        if (this.closed) return false;
+        const previous = role === "host" ? this.host : (role === "audience" ? null : this.findByUserId(userId));
+        if (previous && previous.role !== role) return false;
+        const oldClient = previous && previous.client;
+        client.room = this;
+        client.roomCode = this.code;
+        client.userId = userId;
+        client.role = role;
+        client.isHost = role === "host";
         client.server = server;
         if (role === "host" && server === "blobcast") this.blobcast = true;
         const reconnect = role === "host" ? !!(this.host && this.host.everConnected) : !!this.findByUserId(userId);
@@ -268,6 +297,7 @@ class Room {
             if (existing) {
                 profileId = existing.profileId; self = existing;
                 self.client = client; self.connected = true;
+                name = self.name;
             } else {
                 if (this.nameTaken(name)) { let i = 2; while (this.nameTaken(name + i)) i++; name = name + i; }
                 profileId = this.newProfileId();
@@ -279,12 +309,17 @@ class Room {
             }
         }
 
+        client.profileId = profileId;
+        if (oldClient && oldClient !== client) { try { oldClient.close(1000); } catch { /* closed */ } }
+
         // видимые сущности
-        const entities = {};
+        const entities = Object.create(null);
         Object.keys(this.entities).forEach((key) => {
             const e = this.entities[key];
-            if (role === "audience" ? u.aclVisible(e.acl, "audience", null) : u.aclVisible(e.acl, role, profileId)) {
-                entities[key] = [e.type, this.getBody(key), { locked: u.aclLockedFor(e.acl, role, profileId) }];
+            if (role === "host" || u.aclVisible(e.acl, role, profileId)) {
+                const body = role === "host" || u.aclReadable(e.acl, role, profileId)
+                    ? this.getBody(key) : { key, version: e.version, from: e.from };
+                entities[key] = [e.type, body, { locked: !!e.locked || (role !== "host" && u.aclLockedFor(e.acl, role, profileId)) }];
             }
         });
 
@@ -328,14 +363,7 @@ class Room {
 
     disconnect(client) {
         if (this.host && this.host.client === client) {
-            this.host.connected = false; this.host.client = null;
-            // Хост ушёл (вышел из игры) → комната закрывается, игроков и зрителей выкидываем.
-            Object.values(this.players).forEach((p) => this.sendTo(p.profileId, { opcode: "room/exit", result: { cause: 5 } }));
-            this.sendToAudience({ opcode: "room/exit", result: { cause: 5 } });
-            Object.values(this.audienceClients).forEach((c) => { try { c.close(1000); } catch { /* ignore */ } });
-            Object.values(this._audiencePush).forEach((t) => clearTimeout(t));
-            this._audiencePush = {};
-            delete rooms[this.code];
+            this.close();
             console.log("[room] закрыта (хост вышел):", this.code);
             return;
         }
@@ -352,16 +380,38 @@ class Room {
             this.audienceCount = Math.max(0, this.audienceCount - 1);
         }
     }
+
+    isCurrent(client) {
+        if (this.closed) return false;
+        if (client.role === "audience") return this.audienceClients[client.id] === client;
+        return this._clientOf(client.profileId) === client;
+    }
+
+    close() {
+        if (this.closed) return;
+        this.closed = true;
+        if (rooms[this.code] === this) delete rooms[this.code];
+        this.sendToAll({ opcode: "room/exit", result: { cause: 5 } });
+        const profiles = [...Object.values(this.players), ...(this.host ? [this.host] : [])];
+        const clients = [...profiles.map((p) => p.client), ...Object.values(this.audienceClients)];
+        profiles.forEach((p) => { p.client = null; p.connected = false; });
+        this.audienceClients = Object.create(null);
+        this.audienceCount = 0;
+        Object.values(this._audiencePush).forEach(clearTimeout);
+        this._audiencePush = Object.create(null);
+        Object.values(this.entities).forEach((e) => { if (e.doc) e.doc.destroy(); });
+        clients.forEach((c) => { try { if (c) c.close(1000); } catch { /* closed */ } });
+    }
 }
 
 // ---- менеджер комнат ----
-const rooms = {};
+const rooms = Object.create(null);
 module.exports = {
     Room,
     rooms,
     get: (code) => rooms[code],
-    add: (room) => { rooms[room.code] = room; return room; },
-    remove: (code) => { delete rooms[code]; },
+    add: (room) => { if (rooms[room.code] && rooms[room.code] !== room) rooms[room.code].close(); rooms[room.code] = room; return room; },
+    remove: (code) => { if (rooms[code]) rooms[code].close(); },
     list: () => Object.values(rooms),
     setAdminHook: (fn) => { adminHook = fn; },
 };

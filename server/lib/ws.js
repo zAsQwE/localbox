@@ -8,6 +8,7 @@ const u = require("./util.js");
 const mgr = require("./room.js");
 const artifacts = require("./artifacts.js");
 const render = require("./render.js");
+const network = require("./network.js");
 
 const DEBUG = process.env.LOCALBOX_DEBUG === "1";
 
@@ -58,9 +59,9 @@ function attach(client, roomCode) {
     client.role = null;
     client.userId = null;
     client.sendEcast = (msg, re) => {
-        const room = mgr.get(client.roomCode);
+        const room = client.room || mgr.get(client.roomCode);
         const full = Object.assign({ pc: room ? room.nextPc() : 0, re }, msg);
-        const s = JSON.stringify(full);
+        const s = network.stringify(full, client, room && room.serverUrl);
         if (DEBUG) console.log("[ec> " + client.id + "/" + (client.role || "?") + "] " + s.slice(0, 400));
         try { client.send(s); } catch { /* закрыт */ }
     };
@@ -71,58 +72,65 @@ function attach(client, roomCode) {
 // Вход по WebSocket. code — код комнаты из URL, query — разобранные параметры.
 module.exports = function handleConnection(client, code, query) {
     attach(client, code);
+    client.on("error", (e) => console.log("[ws] ошибка сокета: " + (e && e.message)));
+    const reject = (error) => { client.sendError(undefined, error); client.close(1000); };
     const room = mgr.get(code);
     if (!room) {
         console.log("[ws] НЕТ КОМНАТЫ " + code + " (role=" + (query.role || "?") + ", user-id=" + (query["user-id"] || "?") + ", host-token=" + (query["host-token"] ? "есть" : "нет") + ") — соединение отклонено");
-        client.sendError(undefined, 2013); return;
+        return reject(2013);
     }
 
     const role = query.role;
-    if (["host", "player", "moderator", "audience"].indexOf(role) === -1) { client.sendError(undefined, 2014); return; }
+    if (["host", "player", "moderator", "audience"].indexOf(role) === -1) return reject(2014);
 
-    const userId = query["user-id"] || String(u.randInt(1000000, 9999999));
+    const returning = query.id && room.players[query.id];
+    const resumed = returning && returning.role === role && query.secret === returning.userId;
+    const userId = resumed ? returning.userId : (query["user-id"] || u.makeToken());
+    const existing = role === "audience" ? null : room.findByUserId(userId);
+    if (role !== "host" && existing && existing.role !== role) return reject(2023);
     client.userId = userId;
     client.role = role;
 
     if (role === "host") {
-        if (query["host-token"] !== room.token) { client.sendError(undefined, 1002); return; }
+        if (query["host-token"] !== room.token) return reject(1002);
         client.isHost = true;
     } else if (role === "player") {
         const reconnect = !!room.findByUserId(userId);
-        if (!query.name) { client.sendError(undefined, 2019); return; }
-        if (room.banned.indexOf(userId) !== -1) { client.sendError(undefined, 2023); return; }
-        if (room.locked && !reconnect) { client.sendError(undefined, 2009); return; }
-        if (room.isFull() && !reconnect) { client.sendError(undefined, 2010); return; }
+        if (!query.name) return reject(2019);
+        if (room.banned.indexOf(userId) !== -1) return reject(2023);
+        if (room.password && query.password !== room.password && !resumed) return reject(2023);
+        if (room.locked && !reconnect) return reject(2009);
+        if (room.isFull() && !reconnect) return reject(2010);
+    } else if (role === "moderator") {
+        if (!room.moderatorPassword || (query.password !== room.moderatorPassword && !resumed)) return reject(2023);
+        if (room.banned.includes(userId)) return reject(2023);
     } else if (role === "audience") {
-        if (!room.audienceEnabled) { client.sendError(undefined, 2023); return; }
+        if (!room.audienceEnabled || room.banned.includes(userId)) return reject(2023);
     }
 
-    room.connect(client, userId, query.name || "", role);
-    // profileId вычислен внутри connect — подхватим для диспетчера
-    const self = role === "host" ? room.host : room.findByUserId(userId);
-    if (self) client.profileId = self.profileId;
+    if (!room.connect(client, userId, query.name || "", role)) return reject(2023);
     console.log("[ecast] " + role + " вошёл в комнату " + code + (query.name ? " (" + query.name + ")" : ""));
 
     client.on("message", (data) => {
         if (DEBUG) console.log("[ec< " + client.id + "/" + (client.role || "?") + "] " + data.toString().slice(0, 400));
         let msg;
         try { msg = JSON.parse(data.toString()); } catch { return client.sendError(undefined, 2001); }
+        if (!msg || typeof msg !== "object" || Array.isArray(msg)) return client.sendError(undefined, 2001);
         if (!msg.opcode || typeof msg.opcode !== "string") return client.sendError(undefined, 2002);
-        if (!msg.params || msg.params.constructor !== Object) return client.sendError(msg.seq, 2004);
+        if (!msg.params || typeof msg.params !== "object" || Array.isArray(msg.params)) return client.sendError(msg.seq, 2004);
         try { dispatch(client, msg); }
         catch (e) { console.log("[ws] ОШИБКА обработки '" + msg.opcode + "': " + (e && e.message)); client.sendError(msg.seq, 1000); }
     });
 
     client.on("close", (code, reason) => {
         console.log("[ws] " + (client.role || "?") + " закрыл соединение (code " + code + (reason && reason.length ? ", " + reason.toString().slice(0, 80) : "") + ")");
-        const r = mgr.get(client.roomCode); if (r) r.disconnect(client);
+        room.disconnect(client);
     });
-    client.on("error", (e) => console.log("[ws] ошибка сокета " + (client.role || "?") + ": " + (e && e.message)));
 };
 
 function dispatch(client, msg) {
-    const room = mgr.get(client.roomCode);
-    if (!room) return client.sendError(msg.seq, 2024);
+    const room = client.room;
+    if (!room || !room.isCurrent(client)) return client.sendError(msg.seq, 2024);
     const op = msg.opcode;
     const type = op.split("/")[0];
     const action = op.split("/").pop();
@@ -132,7 +140,7 @@ function dispatch(client, msg) {
     // Админ-мьют: правки сущностей от заглушённого игрока игнорируем (но отвечаем ok, чтобы клиент не завис).
     if (room.muted && room.muted.has(client.profileId)
         && ["object", "text", "number", "doodle", "text-map"].indexOf(type) !== -1
-        && ["create", "set", "update", "increment", "decrement", "push", "sync"].indexOf(action) !== -1) {
+        && ["create", "set", "update", "increment", "decrement", "push", "sync", "stroke", "undo"].indexOf(action) !== -1) {
         return client.sendOk(msg.seq);
     }
 
@@ -160,18 +168,13 @@ function dispatch(client, msg) {
             if (p.to == null) return client.sendError(msg.seq, 2004);
             // ctxUserId = userId ОТПРАВИТЕЛЯ — чтобы для Blobcast-хоста CustomerMessage нёс,
             // КТО прислал (иначе голос/ответ игрока не привязывается к нему).
-            room.sendTo(Number(p.to), { opcode: "client/send", result: { from: p.from, body: p.body } }, undefined, client.userId);
+            if (room.muted.has(client.profileId)) return client.sendOk(msg.seq);
+            room.sendTo(Number(p.to), { opcode: "client/send", result: { from: client.profileId, body: p.body } }, undefined, client.userId);
             break;
         }
         case "client/kick": {
             if (!client.isHost) return client.sendError(msg.seq, 2023);
-            const target = room.players[p.id];
-            if (target) {
-                if (p.ban) room.banned.push(target.userId);
-                room.sendTo(target.profileId, { opcode: "room/exit", result: { cause: 5 } });
-                room.sendToHost({ opcode: "client/kicked", result: { id: target.profileId, role: target.role, reason: p.reason, banned: !!p.ban } });
-                delete room.players[target.profileId];
-            }
+            room.kick(Number(p.id), !!p.ban, p.reason);
             break;
         }
         case "drop": {
@@ -187,6 +190,7 @@ function dispatch(client, msg) {
             room.sendToAll({ opcode: "echo", result: { message: p.message } });
             break;
         case "lock": {
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
             const e = room.entities[p.key];
             if (!e) return client.sendError(msg.seq, 2005, "no known entity with key " + p.key);
             e.locked = true;
@@ -197,6 +201,7 @@ function dispatch(client, msg) {
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             break;
         case "external-request/create":
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
             // Рендер выступления Додо Ре Ми и пр. — сохраняем payload (спека) + позже сам рендер.
             render.handleExternalRequest(client, room, msg);
             return;
@@ -210,7 +215,7 @@ function dispatch(client, msg) {
         }
         case "text-map/create": {
             if (!client.isHost) return client.sendError(msg.seq, 2023);
-            if (!p.key) return client.sendError(msg.seq, 2004);
+            if (typeof p.key !== "string" || !p.key || (p.acl != null && !Array.isArray(p.acl))) return client.sendError(msg.seq, 2004);
             if (room.entities[p.key]) return client.sendError(msg.seq, 2006);
             room.createTextMap(p.key, p.acl, p.val);
             room.notify(p.key, !client.isHost, client.profileId);
@@ -219,17 +224,20 @@ function dispatch(client, msg) {
         case "text-map/sync": {
             const e = room.entities[p.key];
             if (!e || e.type !== "text-map") return client.sendError(msg.seq, 2005, "no text-map " + p.key);
-            room.syncTextMap(p.key, p.msg, client.profileId);
+            if (!client.isHost && (e.locked || u.aclLockedFor(e.acl, client.role, client.profileId))) return client.sendError(msg.seq, 2028);
+            if (typeof p.msg !== "string" || !room.syncTextMap(p.key, p.msg, client.profileId)) return client.sendError(msg.seq, 2004);
             room.notify(p.key, true, client.profileId); // разослать актуальное состояние остальным (+ хосту)
             break;
         }
         case "text-map/get": {
             const e = room.entities[p.key];
             if (!e || e.type !== "text-map") return client.sendError(msg.seq, 2005, "no text-map " + p.key);
+            if (!client.isHost && !u.aclReadable(e.acl, client.role, client.profileId)) return client.sendError(msg.seq, 2023);
             client.sendEcast({ opcode: "text-map/state", result: room.getTextMap(p.key, p.includeNodes) }, msg.seq);
             return;
         }
         default:
+            if (type === "audience") return require("./audience.js")(client, room, msg);
             if (["object", "text", "number", "doodle"].indexOf(type) !== -1) {
                 ok = handleEntity(client, room, msg, type, action);
                 if (ok === undefined) return; // ошибка уже отправлена
@@ -247,10 +255,17 @@ function dispatch(client, msg) {
 function handleEntity(client, room, msg, type, action) {
     const p = msg.params;
     const key = p.key;
-    if (!key) { client.sendError(msg.seq, 2004); return undefined; }
+    if (typeof key !== "string" || !key || (p.acl != null && !Array.isArray(p.acl))) { client.sendError(msg.seq, 2004); return undefined; }
     const role = client.role;
     const profileId = client.profileId;
     let e = room.entities[key];
+    if (e && e.type !== type && action !== "set") { client.sendError(msg.seq, 2004); return undefined; }
+    if (type === "number") {
+        for (const field of ["val", "times", "increment", "min", "max"]) {
+            if (p[field] !== undefined && !Number.isFinite(p[field])) { client.sendError(msg.seq, 2004); return undefined; }
+        }
+        if (p.min != null && p.max != null && p.min > p.max) { client.sendError(msg.seq, 2004); return undefined; }
+    }
 
     if (action === "get") {
         if (!e) { client.sendError(msg.seq, 2005, "no known entity with key " + key); return undefined; }
@@ -268,17 +283,18 @@ function handleEntity(client, room, msg, type, action) {
     } else {
         // update / increment / decrement / stroke / undo
         if (!e) { client.sendError(msg.seq, 2005, "no known entity with key " + key); return undefined; }
-        if (!client.isHost && u.aclLockedFor(e.acl, role, profileId)) { client.sendError(msg.seq, 2028); return undefined; }
+        if (!client.isHost && (e.locked || u.aclLockedFor(e.acl, role, profileId))) { client.sendError(msg.seq, 2028); return undefined; }
         if (type === "doodle" && action === "stroke") {
             e.val.lines.push({ color: p.color || "#ffffff", weight: p.weight || 0, layer: p.layer || 0, points: p.points || [], brush: p.brush });
             e.version += 1; e.from = profileId;
         } else if (type === "doodle" && action === "undo") {
             e.val.lines.pop(); e.version += 1; e.from = profileId;
-        } else if (action === "increment") {
-            room.incrementEntity(key, p.times != null ? p.times : p.val, profileId);
-        } else if (action === "decrement") {
-            room.decrementEntity(key, p.times != null ? p.times : p.val, profileId);
+        } else if (action === "increment" && type === "number") {
+            if (!room.incrementEntity(key, p.times != null ? p.times : p.val, profileId)) { client.sendError(msg.seq, 2004); return undefined; }
+        } else if (action === "decrement" && type === "number") {
+            if (!room.decrementEntity(key, p.times != null ? p.times : p.val, profileId)) { client.sendError(msg.seq, 2004); return undefined; }
         } else if (action === "update") {
+            if (p.val === undefined) { client.sendError(msg.seq, 2004); return undefined; }
             room.updateEntity(key, buildContent(type, action, p), profileId);
         } else {
             client.sendError(msg.seq, 2003); return undefined;

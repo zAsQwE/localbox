@@ -56,7 +56,8 @@ def _player():
 
 
 def _make_sample(engine: str, voice: str, log) -> str | None:
-    out = os.path.join(tempfile.gettempdir(), "localbox_voice_sample.wav")
+    fd, out = tempfile.mkstemp(prefix="localbox_voice_", suffix=".wav")
+    os.close(fd)
     if os.path.exists(out):
         try:
             os.remove(out)
@@ -79,7 +80,7 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
                 env = _py_env({"LOCALBOX_TTS_VOICE": voice})
                 r = subprocess.run([py, str(worker), "--sample", voice, out],
                                    capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=600)
-                if sized():
+                if r.returncode == 0 and sized():
                     return _boost(out, log)
                 if engine == "silero":
                     log("Silero недоступен: " + ((r.stderr or r.stdout or "").strip()[:200] or "нужен pip install torch numpy"))
@@ -100,7 +101,7 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
                 r = subprocess.run([py, "-m", "piper", "-m", v, "--data-dir", str(piper_dir), "-f", out],
                                    input=SAMPLE_TEXT, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                    env=_py_env(), timeout=600)
-                if sized():
+                if r.returncode == 0 and sized():
                     return _boost(out, log)
                 if engine == "piper":
                     err = (r.stderr or "").strip()
@@ -111,9 +112,11 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
             esp = shutil.which("espeak-ng") or shutil.which("espeak")
             if esp:
                 log("Генерирую образец (espeak)…")
-                subprocess.run([esp, "-v", _espeak_voice(voice), "-w", out, SAMPLE_TEXT], capture_output=True)
-                if sized():
+                r = subprocess.run([esp, "-v", _espeak_voice(voice), "-w", out, SAMPLE_TEXT], capture_output=True)
+                if r.returncode == 0 and sized():
                     return _boost(out, log)
+    if os.path.exists(out):
+        os.remove(out)
     return None
 
 
@@ -121,9 +124,14 @@ def _boost(wav: str, log) -> str:
     ff = shutil.which("ffmpeg")
     if not ff:
         return wav
-    loud = os.path.join(tempfile.gettempdir(), "localbox_voice_sample_loud.wav")
-    subprocess.run([ff, "-y", "-i", wav, "-af", "loudnorm=I=-11:TP=-1.5:LRA=11,volume=1.5", loud], capture_output=True)
-    return loud if (os.path.exists(loud) and os.path.getsize(loud) > 100) else wav
+    loud = os.path.splitext(wav)[0] + "_loud.wav"
+    result = subprocess.run([ff, "-y", "-i", wav, "-af", "loudnorm=I=-11:TP=-1.5:LRA=11,volume=1.5", loud], capture_output=True)
+    if result.returncode == 0 and os.path.exists(loud) and os.path.getsize(loud) > 100:
+        os.remove(wav)
+        return loud
+    if os.path.exists(loud):
+        os.remove(loud)
+    return wav
 
 
 def preview(engine: str, voice: str, log=print) -> None:
@@ -132,17 +140,26 @@ def preview(engine: str, voice: str, log=print) -> None:
     if not path:
         log("Не удалось создать образец. Для Silero: pip install torch numpy. Для espeak: поставьте espeak-ng.")
         return
-    pl = _player()
-    if not pl:
-        log("Нет аудиоплеера. Поставьте pulseaudio-utils / alsa-utils / ffmpeg / mpv.")
-        return
     log(f"▶ Играет образец голоса «{voice}»…")
-    args = {
-        "ffplay": [pl, "-nodisp", "-autoexit", "-loglevel", "quiet", path],
-        "mpv": [pl, "--no-video", "--really-quiet", path],
-        "cvlc": [pl, "--play-and-exit", "--intf", "dummy", path],
-    }.get(pl, [pl, path])
     try:
+        if plat.is_windows():
+            import winsound
+            winsound.PlaySound(path, winsound.SND_FILENAME)
+            return
+        pl = "afplay" if plat.is_macos() and shutil.which("afplay") else _player()
+        if not pl:
+            log("Нет аудиоплеера. Поставьте pulseaudio-utils / alsa-utils / ffmpeg / mpv.")
+            return
+        args = {
+            "ffplay": [pl, "-nodisp", "-autoexit", "-loglevel", "quiet", path],
+            "mpv": [pl, "--no-video", "--really-quiet", path],
+            "cvlc": [pl, "--play-and-exit", "--intf", "dummy", path],
+        }.get(pl, [pl, path])
         subprocess.run(args, timeout=30)
     except Exception as e:  # noqa: BLE001
         log(f"Плеер: {e}")
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass

@@ -5,6 +5,8 @@ npm-debug.log*
 # Локальные артефакты (генерируются лаунчером — не публикуются)
 config.json
 launcher/localbox-settings.json
+launcher/install-paths.json
+dist/
 certs/
 *.pem
 *.key
@@ -48,3 +50,14 @@ launcher/dist/
 
 # Ассеты рендера Додо Ре Ми (инструменты/песни, большие, не наши)
 server/render/
+
+# Локальные проверки — не входят в репозиторий и установщики
+/server/test/
+/launcher/test_*.py
+/installer/test_*.py
+/docs/testing.md
+
+# Журналы и временные параметры установки
+*.log
+*.tmp
+/installer/setup-options.ini

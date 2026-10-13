@@ -3,23 +3,26 @@
 #   Copyright (C) 2026 LocalBox contributors
 #   Licensed under the GNU Affero General Public License v3 or later.
 #
-"""Генерация локально-доверенного TLS-сертификата для сервера.
+"""Генерация локального TLS-сертификата для сервера без изменения хранилищ доверия.
 
 Поддерживает имена и IP-адреса (например, локальный IP 192.168.1.10, чтобы телефоны в той
 же сети подключались по https://192.168.1.10).
 
 Стратегия:
-  1) если установлен mkcert — используем его (сразу доверенный в системе, понимает и IP);
-  2) иначе пробуем openssl для самоподписанного сертификата (нужно доверие вручную);
-  3) при отсутствии обоих — понятная инструкция пользователю.
+  1) через openssl создаём собственный корневой CA LocalBox и подписываем им сертификат IP;
+  2) сертификат и ключи сохраняются только в certs/ внутри LocalBox;
+  3) если openssl недоступен, используем mkcert только для генерации, без установки CA.
 """
 
 import ipaddress
+import os
 import platform as _pyplat
 import shutil
 import ssl
 import stat
 import subprocess
+import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -32,6 +35,31 @@ MKCERT_VERSION = "v1.4.4"
 
 def _which(name):
     return shutil.which(name)
+
+
+def _openssl_path() -> str | None:
+    found = _which("openssl")
+    if found:
+        return found
+    exe = "openssl.exe" if plat.is_windows() else "openssl"
+    candidates = [
+        plat.repo_root() / "runtime" / exe,
+        plat.repo_root() / "runtime" / "bin" / exe,
+    ]
+    if plat.is_windows():
+        for base in filter(None, [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")]):
+            candidates.extend([
+                Path(base) / "Git" / "usr" / "bin" / exe,
+                Path(base) / "Git" / "mingw64" / "bin" / exe,
+                Path(base) / "Programs" / "Git" / "usr" / "bin" / exe,
+            ])
+    elif plat.is_macos():
+        candidates.extend([
+            Path("/opt/homebrew/opt/openssl@3/bin/openssl"),
+            Path("/usr/local/opt/openssl@3/bin/openssl"),
+            Path("/opt/homebrew/bin/openssl"),
+        ])
+    return next((str(candidate) for candidate in candidates if candidate.is_file()), None)
 
 
 def _mkcert_local_path() -> Path:
@@ -74,7 +102,7 @@ def _ensure_mkcert(log):
         log(f"mkcert готов: {local}")
         return str(local)
     except Exception as e:  # noqa: BLE001
-        log(f"Не удалось скачать mkcert ({e}). Откат на openssl/самоподписанный.")
+        log(f"Не удалось скачать mkcert ({e}).")
         try:
             tmp.unlink()
         except OSError:
@@ -94,6 +122,10 @@ def cert_files(certs_dir: Path):
     return certs_dir / "localbox.pem", certs_dir / "localbox-key.pem"
 
 
+def localbox_ca_files(certs_dir: Path):
+    return certs_dir / "localbox-ca.pem", certs_dir / "localbox-ca-key.pem"
+
+
 def _cert_sans(cert_path: Path):
     """Список SAN-имён из PEM-сертификата (через stdlib ssl, без внешних зависимостей)."""
     try:
@@ -108,7 +140,21 @@ def cert_ok_for(host: str) -> bool:
     cert, key = cert_files(plat.certs_dir())
     if not cert.exists() or not key.exists():
         return False
-    return host in _cert_sans(cert)
+    try:
+        info = ssl._ssl._test_decode_cert(str(cert))
+        now = time.time()
+        if not ssl.cert_time_to_seconds(info["notBefore"]) <= now < ssl.cert_time_to_seconds(info["notAfter"]):
+            return False
+        # Also reject a damaged key or a key belonging to a different certificate.
+        ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(str(cert), str(key))
+        for typ, name in info.get("subjectAltName", ()):
+            if typ == "IP Address" and is_ip(host) and ipaddress.ip_address(host) == ipaddress.ip_address(name):
+                return True
+            if typ == "DNS" and name.lower() == host.lower():
+                return True
+    except (OSError, ValueError, KeyError):
+        pass
+    return False
 
 
 def _dedup(names):
@@ -136,20 +182,20 @@ def generate_cert(names, log=print, force: bool = False) -> bool:
         log("Не задано ни одного имени/IP для сертификата.")
         return False
 
-    if cert.exists() and key.exists() and not force:
+    if not force and all(cert_ok_for(name) for name in names):
         log(f"Сертификат уже есть: {cert} (для перегенерации используйте кнопку «Получить сертификат»)")
         return True
 
     log(f"Имена/IP в сертификате: {', '.join(names)}")
 
+    if _openssl_path():
+        return _generate_localbox_openssl(names, cert, key, log)
     mk = _ensure_mkcert(log)
-    if mk:
-        return _generate_mkcert(mk, names, cert, key, log)
-    if _which("openssl"):
-        return _generate_openssl(names, cert, key, log)
+    if mk and _generate_mkcert(mk, names, cert, key, log):
+        return True
 
-    log("Не найден mkcert (не удалось скачать) и нет openssl.")
-    log("Проверьте интернет и повторите, либо поставьте mkcert/openssl вручную.")
+    log("Не найден openssl, а mkcert не удалось скачать.")
+    log("Проверьте интернет и повторите либо установите openssl вручную.")
     return False
 
 
@@ -163,7 +209,7 @@ def ensure_cert(host: str, log=print, extra_names=None, force: bool = False) -> 
 
 
 def ensure_local_cert(local_ip: str, log=print, force: bool = True) -> bool:
-    """Сертификат для локального использования по IP (mkcert 192.168.1.10 и т.п.)."""
+    """Сертификат LocalBox для локального IP (например, 192.168.1.10)."""
     if not is_ip(local_ip):
         log(f"«{local_ip}» не похоже на IP-адрес.")
         return False
@@ -173,101 +219,115 @@ def ensure_local_cert(local_ip: str, log=print, force: bool = True) -> bool:
     )
 
 
-def _mkcert_caroot(mk="mkcert"):
-    try:
-        r = subprocess.run([mk, "-CAROOT"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
-        return r.stdout.strip()
-    except Exception:  # noqa: BLE001
-        return None
-
-
 def _generate_mkcert(mk, names, cert: Path, key: Path, log) -> bool:
-    log("Генерация доверенного сертификата через mkcert…")
-
-    # -install добавляет корневой CA в доверие (на Windows — в системное хранилище, один раз
-    # запрос прав администратора). На Arch/CachyOS mkcert ошибочно зовёт update-ca-certificates
-    # (Debian) вместо update-ca-trust и прерывается ДО установки в браузерное хранилище (NSS) —
-    # поэтому доверие в браузер/систему добавляем сами ниже.
-    subprocess.run([mk, "-install"], capture_output=True, text=True, encoding="utf-8", errors="replace")
-
-    try:
-        # mkcert принимает и доменные имена, и IP как обычные аргументы.
-        subprocess.run(
-            [mk, "-cert-file", str(cert), "-key-file", str(key), *names],
-            check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        log(f"Готово: {cert}")
-        trust_ca(log=log, mk=mk)
-        return True
-    except subprocess.CalledProcessError as e:
-        log(f"mkcert не смог сгенерировать сертификат: {e.stderr or e}")
-        return False
-
-
-def trust_ca(log=print, mk="mkcert") -> None:
-    """Добавляет корневой CA mkcert в доверенные — браузер (NSS) и подсказка для системы.
-
-    На Linux Chrome/Chromium используют NSS-базу ~/.pki/nssdb (отдельно от системного доверия),
-    поэтому без этого шага браузер не доверяет проксируемым ресурсам.
-    """
-    caroot = _mkcert_caroot(mk)
-    if not caroot:
-        return
-    rootca = Path(caroot) / "rootCA.pem"
-    if not rootca.exists():
-        log("Корневой CA не найден — пропускаю установку доверия.")
-        return
-
-    if plat.is_linux():
-        _trust_ca_nss_linux(rootca, log)
-        log("Системное доверие (для игр/curl): sudo trust anchor --store " + str(rootca))
-        log("ВАЖНО: на телефоне/другом устройстве этот же CA нужно установить вручную,")
-        log(f"иначе устройство не доверяет серверу. Файл CA: {rootca}")
-    elif plat.is_macos():
-        log("macOS: доверие добавляется mkcert автоматически; при проблемах см. вывод mkcert -install.")
-    # Windows: mkcert -install обычно ставит CA в системное хранилище штатно.
-
-
-def _trust_ca_nss_linux(rootca: Path, log) -> None:
-    if not _which("certutil"):
-        log("Для доверия в Chrome нужен certutil. Установите пакет nss: sudo pacman -S nss")
-        return
-    nssdb = Path.home() / ".pki" / "nssdb"
-    nssdb.mkdir(parents=True, exist_ok=True)
-    # Удаляем старую запись с тем же ником (идемпотентность), затем добавляем.
-    subprocess.run(["certutil", "-D", "-d", f"sql:{nssdb}", "-n", "mkcert-localbox"],
-                   capture_output=True, text=True, encoding="utf-8", errors="replace")
-    res = subprocess.run(
-        ["certutil", "-A", "-d", f"sql:{nssdb}", "-t", "C,,", "-n", "mkcert-localbox", "-i", str(rootca)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if res.returncode == 0:
-        log("CA добавлен в доверие браузера (NSS ~/.pki/nssdb). ПЕРЕЗАПУСТИТЕ Chrome/Chromium полностью.")
-    else:
-        log(f"Не удалось добавить CA в NSS: {res.stderr or res.stdout}")
-
-
-def _generate_openssl(names, cert: Path, key: Path, log) -> bool:
-    log("Генерация самоподписанного сертификата через openssl…")
-    san = ",".join(
-        [f"IP:{n}" if is_ip(n) else f"DNS:{n}" for n in names]
-    )
-    cn = names[0]
+    """Creates files in LocalBox only; never invokes mkcert's CA installation mode."""
+    log("Генерация локального сертификата через mkcert…")
+    # Override a user's global CAROOT so neither the CA nor its key goes into shared storage.
+    caroot = cert.parent / "mkcert-ca"
+    work = Path(tempfile.mkdtemp(prefix="localbox-cert-", dir=cert.parent))
+    new_cert, new_key = work / "server.pem", work / "server-key.pem"
+    env = {**os.environ, "CAROOT": str(caroot.resolve())}
     try:
         subprocess.run(
-            [
-                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                "-keyout", str(key), "-out", str(cert),
-                "-days", "825", "-subj", f"/CN={cn}",
-                "-addext", f"subjectAltName={san}",
-            ],
-            check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            [mk, "-cert-file", str(new_cert), "-key-file", str(new_key), *names],
+            env=env, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-        log(f"Готово: {cert}")
-        log("ВНИМАНИЕ: сертификат самоподписанный. Чтобы игры/телефоны ему доверяли,")
-        log("добавьте его в доверенные корневые сертификаты системы/устройства вручную")
-        log("(mkcert делает это автоматически — рекомендуется установить его).")
+        shutil.copyfile(caroot / "rootCA.pem", localbox_ca_files(cert.parent)[0])
+        shutil.copyfile(caroot / "rootCA.pem", cert.parent / "localbox-rootCA.pem")
+        new_cert.replace(cert)
+        new_key.replace(key)
+        try:
+            key.chmod(0o600)
+            (caroot / "rootCA-key.pem").chmod(0o600)
+        except OSError:
+            pass
+        log(f"Готово: {cert}. Хранилища доверия не изменялись.")
         return True
-    except subprocess.CalledProcessError as e:
-        log(f"openssl завершился с ошибкой: {e.stderr or e}")
+    except (subprocess.CalledProcessError, OSError) as e:
+        log(f"mkcert не смог сгенерировать сертификат: {getattr(e, 'stderr', None) or e}")
         return False
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _generate_localbox_openssl(names, cert: Path, key: Path, log) -> bool:
+    """Creates one persistent LocalBox CA and a replaceable IP/DNS leaf certificate."""
+    openssl = _openssl_path() or "openssl"
+    ca, ca_key = localbox_ca_files(cert.parent)
+    work = Path(tempfile.mkdtemp(prefix="localbox-cert-", dir=cert.parent))
+    new_ca, new_ca_key = work / "ca.pem", work / "ca-key.pem"
+    new_cert, new_key, csr, ext = work / "server.pem", work / "server-key.pem", work / "server.csr", work / "server.ext"
+    try:
+        use_existing_ca = ca.is_file() and ca_key.is_file()
+        if use_existing_ca:
+            # Reject an expired/damaged CA or a mismatched private key.
+            ca_check = subprocess.run(
+                [openssl, "x509", "-checkend", "86400", "-noout", "-in", str(ca)],
+                capture_output=True,
+            )
+            pub_cert = subprocess.run([openssl, "x509", "-in", str(ca), "-pubkey", "-noout"], capture_output=True)
+            pub_key = subprocess.run([openssl, "pkey", "-in", str(ca_key), "-pubout"], capture_output=True)
+            use_existing_ca = ca_check.returncode == 0 and pub_cert.returncode == 0 and pub_cert.stdout == pub_key.stdout
+
+        if use_existing_ca:
+            shutil.copyfile(ca, new_ca)
+            shutil.copyfile(ca_key, new_ca_key)
+        else:
+            log("Создаю локальный корневой сертификат LocalBox…")
+            subprocess.run([
+                openssl, "req", "-x509", "-newkey", "rsa:3072", "-nodes", "-sha256",
+                "-keyout", str(new_ca_key), "-out", str(new_ca), "-days", "3650",
+                "-subj", "/O=LocalBox/CN=LocalBox Local CA",
+                "-addext", "basicConstraints=critical,CA:TRUE,pathlen:0",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                "-addext", "subjectKeyIdentifier=hash",
+            ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+        san_lines = []
+        for index, name in enumerate(names, 1):
+            if not is_ip(name) and (not name or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_" for c in name)):
+                raise ValueError(f"недопустимое имя для сертификата: {name!r}")
+            san_lines.append(f"{'IP' if is_ip(name) else 'DNS'}.{index} = {name}")
+        ext.write_text(
+            "basicConstraints = critical,CA:FALSE\n"
+            "keyUsage = critical,digitalSignature,keyEncipherment\n"
+            "extendedKeyUsage = serverAuth\n"
+            "subjectKeyIdentifier = hash\n"
+            "authorityKeyIdentifier = keyid,issuer\n"
+            "subjectAltName = @alt_names\n[alt_names]\n" + "\n".join(san_lines) + "\n",
+            encoding="ascii",
+        )
+        log("Подписываю сертификат сервера локальным CA LocalBox…")
+        subprocess.run([
+            openssl, "req", "-new", "-newkey", "rsa:2048", "-nodes", "-sha256",
+            "-keyout", str(new_key), "-out", str(csr), "-subj", f"/O=LocalBox/CN={names[0]}",
+        ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        serial = "0x" + os.urandom(16).hex()
+        subprocess.run([
+            openssl, "x509", "-req", "-in", str(csr), "-CA", str(new_ca), "-CAkey", str(new_ca_key),
+            "-set_serial", serial, "-out", str(new_cert), "-days", "825", "-sha256", "-extfile", str(ext),
+        ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        subprocess.run([openssl, "verify", "-CAfile", str(new_ca), str(new_cert)], check=True, capture_output=True)
+
+        for source, destination in [(new_ca, ca), (new_ca_key, ca_key), (new_cert, cert), (new_key, key)]:
+            source.replace(destination)
+        # Public download served by LocalBox; this remains inside certs/.
+        shutil.copyfile(ca, cert.parent / "localbox-rootCA.pem")
+        try:
+            ca_key.chmod(0o600)
+            key.chmod(0o600)
+        except OSError:
+            pass
+        log(f"Готово: {cert} (подписан LocalBox Local CA)")
+        log("Сертификат и ключи сохранены локально. Хранилища доверия не изменялись.")
+        return True
+    except (subprocess.CalledProcessError, OSError, ValueError) as e:
+        detail = getattr(e, "stderr", None) or str(e)
+        log(f"Не удалось создать сертификат LocalBox: {detail}")
+        return False
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# Kept as an internal compatibility alias for older imports/tests.
+_generate_openssl = _generate_localbox_openssl

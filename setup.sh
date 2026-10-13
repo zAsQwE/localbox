@@ -1,157 +1,99 @@
 #!/usr/bin/env bash
-#
-# LocalBox — установка одной командой (Linux / macOS).
-#
-#   ./setup.sh          — всё: системные зависимости + движок + английский клиент (client/)
-#   ./setup.sh --ru     — то же + скачать русский клиент (client-ru/) с jackbox.ru (долго, ~0.5 ГБ)
-#   ./setup.sh --run    — после установки сразу запустить (GUI, или сервер если нет дисплея)
-#
-# Пытается доставить недостающее САМ через пакетный менеджер (apt/pacman/dnf/zypper/brew).
-# Node.js/Python/tkinter/ffmpeg ставятся автоматически (с sudo, где нужно). На Windows — install.bat.
-#
-set -u
-cd "$(cd "$(dirname "$0")" && pwd)"   # корень проекта
-
-say()  { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
-ok()   { printf '  \033[32m[ok]\033[0m %s\n' "$*"; }
-warn() { printf '  \033[33m[!]\033[0m %s\n' "$*"; }
-err()  { printf '  \033[31m[x]\033[0m %s\n' "$*"; }
-
-FETCH_RU=0; RUN_AFTER=0
-for a in "$@"; do
-    case "$a" in
-        --ru) FETCH_RU=1 ;;
-        --run) RUN_AFTER=1 ;;
-    esac
-done
-
-# --- определить пакетный менеджер ---
-PM=""; SUDO=""
-if   command -v apt-get >/dev/null 2>&1; then PM=apt
-elif command -v pacman  >/dev/null 2>&1; then PM=pacman
-elif command -v dnf     >/dev/null 2>&1; then PM=dnf
-elif command -v zypper  >/dev/null 2>&1; then PM=zypper
-elif command -v brew    >/dev/null 2>&1; then PM=brew
-fi
-[ "$PM" != "brew" ] && [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-
-# pkg_install <apt-пакеты> <pacman> <dnf> <zypper> <brew>  (x = пропустить на этом ПМ)
-pkg_install() {
-    case "$PM" in
-        apt)    [ "$1" = x ] || { $SUDO apt-get update -y && $SUDO apt-get install -y $1; } ;;
-        pacman) [ "$2" = x ] || $SUDO pacman -S --needed --noconfirm $2 ;;
-        dnf)    [ "$3" = x ] || $SUDO dnf install -y $3 ;;
-        zypper) [ "$4" = x ] || $SUDO zypper install -y $4 ;;
-        brew)   [ "$5" = x ] || brew install $5 ;;
-        *)      return 1 ;;
-    esac
+# Linux/macOS: графический мастер; без дисплея — те же вопросы текстом.
+set -euo pipefail
+LOCALBOX_SOURCE="$(cd "$(dirname "$0")" && pwd)"
+mode=auto
+target="${LOCALBOX_BUNDLE_SOURCE:+$HOME/.local/share/localbox}"
+target="${target:-$LOCALBOX_SOURCE}"
+runtime_dir=""
+tts=""
+voices="ru_RU-denis-medium"
+game=""
+cheat_content=""
+cheat_configured=0
+dodo=0
+russian=0
+run_after=0
+noninteractive=0
+usage() {
+    printf '%s\n' 'setup.sh [--gui|--console] [--target ПАПКА] [--runtime ПАПКА] [--tts none|piper|silero|both|espeak]' \
+        '         [--voices ru_RU-denis-medium,ru_RU-irina-medium] [--game ПАПКА_JACKBOX10] [--cheat-content ПАПКА_ИГР] [--dodo] [--ru] [--run]' \
+        'Установка с параметрами --target или --tts не задаёт вопросов.'
 }
-
-# 1) Node.js / npm
-say "Node.js"
-if command -v node >/dev/null 2>&1; then
-    ok "node $(node -v), npm $(npm -v 2>/dev/null)"
-else
-    warn "Node.js не найден — устанавливаю…"
-    if [ "$PM" = "apt" ]; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash - && $SUDO apt-get install -y nodejs
-    else
-        pkg_install nodejs "nodejs npm" "nodejs npm" "nodejs npm" node
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --help|-h) usage; exit 0 ;;
+        --gui) mode=gui ;;
+        --console) mode=console ;;
+        --target|--runtime|--tts|--voices|--game|--cheat-content)
+            if [ "$#" -lt 2 ]; then usage >&2; exit 2; fi
+            key="$1"; shift
+            case "$key" in
+                --target) target="$1"; noninteractive=1 ;;
+                --runtime) runtime_dir="$1" ;;
+                --tts) tts="$1"; noninteractive=1 ;;
+                --voices) voices="$1" ;;
+                --game) game="$1"; dodo=1 ;;
+                --cheat-content) cheat_content="$1"; cheat_configured=1 ;;
+            esac ;;
+        --dodo) dodo=1 ;;
+        --ru) russian=1 ;;
+        --run) run_after=1 ;;
+        *) printf 'Неизвестный аргумент: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+if { [ "$noninteractive" = 0 ] || [ "$mode" = gui ]; } && [ "$mode" != console ] && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+    bash "$LOCALBOX_SOURCE/installer/linux-deps.sh" --gui
+    args=(--target "$target")
+    [ -z "$runtime_dir" ] || args+=(--runtime "$runtime_dir")
+    [ -z "$game" ] || args+=(--game "$game")
+    [ "$cheat_configured" = 0 ] || args+=(--cheat-content "$cheat_content")
+    [ -z "$tts" ] || args+=(--tts "$tts")
+    args+=(--voices "$voices")
+    [ "$russian" = 0 ] || args+=(--ru)
+    [ "$dodo" = 0 ] || args+=(--dodo)
+    [ "$run_after" = 0 ] || args+=(--run)
+    exec python3 "$LOCALBOX_SOURCE/installer/wizard.py" "${args[@]}"
+fi
+if [ "$mode" = gui ]; then printf '%s\n' 'Нет графической сессии. Используйте --console.' >&2; exit 1; fi
+if [ "$noninteractive" = 0 ] && [ -t 0 ]; then
+    printf '\nLocalBox — установка\n'
+    read -r -p "Папка приложения [$target]: " answer; target="${answer:-$target}"
+    read -r -p "Папка зависимостей и TTS [$target/runtime]: " runtime_dir
+    printf '\nTTS: [1] Piper  [2] Silero  [3] Оба  [4] eSpeak  [5] Без озвучки\n'
+    while true; do
+        read -r -p 'Ваш выбор [1]: ' answer
+        case "${answer:-1}" in 1) tts=piper; break;; 2) tts=silero; break;; 3) tts=both; break;; 4) tts=espeak; break;; 5) tts=none; break;; esac
+    done
+    if [ "$tts" = piper ] || [ "$tts" = both ]; then
+        printf '%s\n' 'Голоса Piper: [1] Денис [2] Дмитрий [3] Ирина [4] Руслан'
+        while true; do
+            read -r -p 'Номера через запятую [1]: ' answer
+            IFS=, read -ra numbers <<< "${answer:-1}"
+            selected=(); invalid=0
+            for number in "${numbers[@]}"; do
+                case "$number" in
+                    1) selected+=(ru_RU-denis-medium);; 2) selected+=(ru_RU-dmitri-medium);;
+                    3) selected+=(ru_RU-irina-medium);; 4) selected+=(ru_RU-ruslan-medium);; *) invalid=1;;
+                esac
+            done
+            if [ "$invalid" = 0 ]; then voices="$(IFS=,; echo "${selected[*]}")"; break; fi
+        done
     fi
-    if command -v node >/dev/null 2>&1; then ok "node $(node -v)"; else
-        err "не удалось поставить Node.js автоматически. Поставьте вручную (https://nodejs.org) и повторите."; exit 1
-    fi
+    read -r -p 'Включить Додо Ре Ми? [y/N]: ' answer
+    case "$answer" in y|Y|д|Д) dodo=1; read -r -p 'Папка Jackbox Party Pack 10 (Enter — без импорта музыки): ' game;; esac
+    read -r -p 'Папка с играми для читов (Enter — поиск в Steam): ' cheat_content
+    cheat_configured=1
+    read -r -p 'Скачать русский веб-клиент? [y/N]: ' answer
+    case "$answer" in y|Y|д|Д) russian=1;; esac
 fi
-
-# 2) Python 3 (нужен для лаунчера)
-say "Python 3"
-if command -v python3 >/dev/null 2>&1; then
-    ok "$(python3 --version 2>&1)"
-else
-    warn "Python 3 не найден — устанавливаю…"
-    pkg_install python3 python python3 python3 python
-    command -v python3 >/dev/null 2>&1 && ok "$(python3 --version 2>&1)" || warn "поставьте python3 вручную (нужен для лаунчера)"
-fi
-
-# 2b) tkinter (GUI лаунчера) — на Arch/Debian/Fedora это ОТДЕЛЬНЫЙ пакет, не идёт с python3.
-#     Без него launcher/localbox_launcher.py молча падает в headless-режим (окно не открывается,
-#     кажется что "ничего не происходит") — ставим сразу, чтобы GUI точно работал.
-say "tkinter (GUI лаунчера)"
-if python3 -c "import tkinter" >/dev/null 2>&1; then
-    ok "есть"
-else
-    warn "нет — ставлю (иначе окно лаунчера не откроется, будет только консольный режим)…"
-    pkg_install python3-tk tk python3-tkinter python3-tk python-tk
-    python3 -c "import tkinter" >/dev/null 2>&1 && ok "поставлен" \
-        || warn "не удалось поставить автоматически — поставь вручную: Debian/Ubuntu 'sudo apt install python3-tk', Arch 'sudo pacman -S tk', Fedora 'sudo dnf install python3-tkinter', macOS 'brew install python-tk'."
-fi
-
-# 3) ffmpeg (TTS + рендер Додо Ре Ми)
-say "ffmpeg"
-if command -v ffmpeg >/dev/null 2>&1; then
-    ok "есть"
-else
-    warn "ffmpeg не найден — устанавливаю (нужен для TTS и рендера Додо Ре Ми)…"
-    pkg_install ffmpeg ffmpeg ffmpeg ffmpeg ffmpeg
-    command -v ffmpeg >/dev/null 2>&1 && ok "поставлен" || warn "поставьте ffmpeg вручную позже"
-fi
-
-# 4) mkcert (доверенный TLS — по желанию)
-say "mkcert (по желанию)"
-if command -v mkcert >/dev/null 2>&1; then
-    ok "есть"
-else
-    warn "нет — ставлю (иначе будет самоподписанный серт)…"
-    pkg_install "mkcert libnss3-tools" "mkcert nss" mkcert mkcert mkcert
-    command -v mkcert >/dev/null 2>&1 && ok "поставлен" || warn "необязателен — примешь предупреждение о серте в браузере"
-fi
-
-# 5) Зависимости движка (server/node_modules)
-say "Зависимости движка (server/)"
-if [ -d server/node_modules/express ]; then
-    ok "уже установлены"
-else
-    echo "  npm i в server/ …"
-    if ( cd server && npm i ); then ok "установлены"; else err "npm i не удался"; exit 1; fi
-fi
-
-# 6) Английский клиент (client/) — ассеты игр для телефонов
-say "Английский клиент (client/)"
-if [ -d client ] && [ -e client/main ]; then
-    ok "уже есть"
-elif command -v git >/dev/null 2>&1; then
-    echo "  git clone DdejjCAT/jackbox.tv (большой, ~1 ГБ)…"
-    if git clone --depth 1 https://github.com/DdejjCAT/jackbox.tv client; then
-        ok "скачан"
-    else
-        warn "не удалось склонировать — движок дотянет ассеты с jackbox.tv при первой загрузке"
-    fi
-else
-    warn "git не найден — установите git или скачайте client/ вручную (см. README)"
-fi
-
-# 7) Русский клиент (client-ru/) — по желанию
-say "Русский клиент (client-ru/)"
-if [ -d client-ru ] && [ -n "$(ls -A client-ru 2>/dev/null)" ]; then
-    ok "уже есть"
-elif [ "$FETCH_RU" = "1" ]; then
-    if [ -e client/main ]; then
-        echo "  скачиваю с jackbox.ru (может занять время)…"
-        node tools/fetch-fun.js --host jackbox.ru --dst client-ru && ok "скачан" \
-            || warn "докачка не удалась — движок дотянет недостающее при первой загрузке"
-    else
-        warn "нужен client/ как индекс путей — сначала английский клиент"
-    fi
-else
-    warn "пропущен (необязателен). Движок сам докачает нужное с jackbox.ru. Заранее: ./setup.sh --ru"
-fi
-
-say "Готово"
-echo "Запуск:  cd launcher && python3 localbox_launcher.py           # GUI (локально)"
-echo "         cd launcher && python3 localbox_launcher.py -ip=АЙПИ  # сервер по сети"
-echo "Игра (Steam → Параметры запуска):  -jbg.config serverUrl=АДРЕС"
-
-if [ "$RUN_AFTER" = "1" ]; then
-    say "Запускаю лаунчер"
-    ( cd launcher && python3 localbox_launcher.py )
-fi
+bash "$LOCALBOX_SOURCE/installer/linux-deps.sh" --python
+args=(--target "$target" --tts "${tts:-piper}" --voices "$voices")
+[ -z "$runtime_dir" ] || args+=(--runtime "$runtime_dir")
+[ -z "$game" ] || args+=(--game "$game")
+[ "$cheat_configured" = 0 ] || args+=(--cheat-content "$cheat_content")
+[ "$russian" = 0 ] || args+=(--ru)
+[ "$dodo" = 0 ] || args+=(--dodo)
+python3 "$LOCALBOX_SOURCE/installer/install.py" "${args[@]}"
+if [ "$run_after" = 1 ]; then exec bash "$target/start-server.sh"; fi

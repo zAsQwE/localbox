@@ -63,15 +63,15 @@ def hosts_path() -> Path:
 
 
 def _looks_like_repo(p: Path) -> bool:
-    """Каталог похож на корень LocalBox, если в нём есть папка engine/."""
-    return (p / "engine").is_dir()
+    """Каталог похож на корень LocalBox, если в нём есть папка server/."""
+    return (p / "server" / "server.js").is_file()
 
 
 def repo_root() -> Path:
-    """Корень проекта LocalBox (где лежит папка engine/).
+    """Корень проекта LocalBox (где лежит папка server/).
 
     Ищем НАДЁЖНО: поднимаемся вверх от исполняемого файла/скрипта, пока не найдём каталог
-    с папкой engine/. Работает и из исходников, и из собранного exe, где бы он ни лежал
+    с папкой server/. Работает и из исходников, и из собранного exe, где бы он ни лежал
     (launcher/, launcher/dist/, корень проекта и т.п.).
     """
     starts = []

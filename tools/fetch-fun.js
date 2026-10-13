@@ -1,8 +1,9 @@
 /*
     LocalBox — загрузчик ассетов jackbox.fun.
 
-    Идея: английский клиент (client/) содержит ВСЕ пути файлов с теми же хешами, что и jackbox.fun.
-    Берём этот список путей как «оглавление» и для каждого качаем файл с jackbox.fun в client-fun/.
+    Читаем index.html и таблицу модулей самого скачиваемого клиента, затем CSS/JS/HTML.
+    Поддерживаются старые вложенные пути и новые плоские пути с хешами в именах файлов.
+    Имена и хеши русского клиента могут отличаться от английского.
     Так русский клиент (client-fun/) становится полным по всем частям (pp1..pp11, ppad, ...),
     с русскими версиями ассетов там, где они отличаются.
 
@@ -11,6 +12,7 @@
         node tools/fetch-fun.js --concurrency 16
         node tools/fetch-fun.js --host jackbox.fun --src client --dst client-fun
         node tools/fetch-fun.js --only main/pp5     # только часть пути (например один пак)
+        node tools/fetch-fun.js --host jackbox.ru --dst client-ru --repair --only main/pp7/quiplash3
 
     Возобновляемый: уже скачанные в client-fun файлы пропускаются. DoH (1.1.1.1) используется,
     чтобы достучаться до НАСТОЯЩЕГО jackbox.fun даже если домен завёрнут через hosts.
@@ -21,6 +23,7 @@
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const { references, TEXT } = require("./asset-references.js");
 
 const REPO = path.resolve(__dirname, "..");
 
@@ -28,23 +31,30 @@ function parseArgs(argv) {
     const a = { host: "jackbox.fun", src: "client", dst: "client-fun", concurrency: 8,
                 only: null, doh: "https://1.1.1.1/dns-query",
                 // режим диапазона:
-                url: null, from: null, to: null, ext: ".ogg", pad: 0, dry: false, noDoh: false };
+                url: null, from: null, to: null, ext: ".ogg", pad: 0, dry: false, noDoh: false, repair: false };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i];
         if (k === "--host") a.host = argv[++i];
         else if (k === "--src") a.src = argv[++i];
         else if (k === "--dst") a.dst = argv[++i];
-        else if (k === "--concurrency") a.concurrency = Number(argv[++i]) || a.concurrency;
+        else if (k === "--concurrency") a.concurrency = Number(argv[++i]);
         else if (k === "--only") a.only = argv[++i];
         else if (k === "--doh") a.doh = argv[++i];
         else if (k === "--url") a.url = argv[++i];
-        else if (k === "--from") a.from = parseInt(argv[++i], 10);
-        else if (k === "--to") a.to = parseInt(argv[++i], 10);
+        else if (k === "--from") a.from = Number(argv[++i]);
+        else if (k === "--to") a.to = Number(argv[++i]);
         else if (k === "--ext") a.ext = argv[++i];
-        else if (k === "--pad") a.pad = Number(argv[++i]) || 0;
+        else if (k === "--pad") a.pad = Number(argv[++i]);
         else if (k === "--dry") a.dry = true;
         else if (k === "--no-doh") a.noDoh = true;
+        else if (k === "--repair") a.repair = true;
     }
+    if (!Number.isInteger(a.concurrency) || a.concurrency < 1 || a.concurrency > 128)
+        throw new Error("--concurrency must be an integer from 1 to 128");
+    for (const key of ["host", "src", "dst", "doh", "ext"])
+        if (typeof a[key] !== "string" || !a[key]) throw new Error("Missing --" + key + " value");
+    if (!Number.isSafeInteger(a.pad) || a.pad < 0 || a.pad > 1000) throw new Error("Invalid --pad");
+    if (a.url && (!Number.isSafeInteger(a.from) || !Number.isSafeInteger(a.to) || a.to < a.from)) throw new Error("Invalid --from/--to range");
     return a;
 }
 
@@ -58,6 +68,8 @@ function resolveIp(host, dohUrl) {
             method: "GET", headers: { accept: "application/dns-json", host: u.hostname },
         };
         const r = https.request(opts, (res) => {
+            res.on("error", reject);
+            res.on("aborted", () => reject(new Error("DNS response interrupted")));
             let b = ""; res.on("data", (c) => (b += c));
             res.on("end", () => {
                 try {
@@ -66,13 +78,15 @@ function resolveIp(host, dohUrl) {
                 } catch (e) { reject(e); }
             });
         });
-        r.on("error", reject); r.end();
+        r.on("error", reject);
+        r.setTimeout(20000, () => r.destroy(new Error("DNS timeout"))); r.end();
     });
 }
 
 // Рекурсивно собирает относительные пути всех файлов в каталоге.
 function walk(dir, base = dir, out = []) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name.startsWith(".") || e.name === "node_modules") continue;
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full, base, out);
         else if (e.isFile()) out.push(path.relative(base, full));
@@ -81,25 +95,11 @@ function walk(dir, base = dir, out = []) {
 }
 
 function download(host, ip, rel, dstFile) {
-    return new Promise((resolve) => {
-        const opts = {
-            host: ip || host, servername: host, port: 443,
-            path: "/" + rel.split(path.sep).join("/"),
-            method: "GET", headers: { host, "user-agent": "LocalBox-fetch-fun" },
-        };
-        const req = https.request(opts, (res) => {
-            if (res.statusCode !== 200) { res.resume(); return resolve({ ok: false, status: res.statusCode }); }
-            fs.mkdirSync(path.dirname(dstFile), { recursive: true });
-            const tmp = dstFile + ".part";
-            const ws = fs.createWriteStream(tmp);
-            res.pipe(ws);
-            ws.on("finish", () => { ws.close(() => { fs.renameSync(tmp, dstFile); resolve({ ok: true }); }); });
-            ws.on("error", (e) => resolve({ ok: false, error: e.message }));
-        });
-        req.on("error", (e) => resolve({ ok: false, error: e.message }));
-        req.setTimeout(20000, () => req.destroy(new Error("timeout")));
-        req.end();
-    });
+    return require("../server/lib/download.js")({
+        host: ip || host, servername: host, port: 443,
+        path: "/" + rel.split(path.sep).join("/").split("/").map(encodeURIComponent).join("/"),
+        headers: { host, "user-agent": "LocalBox-fetch-fun" },
+    }, dstFile);
 }
 
 // Режим диапазона: качает NNNNNN.ogg от --from до --to (включительно) с --url.
@@ -175,42 +175,87 @@ async function main() {
     if (args.url) return runRange(args);
     const srcDir = path.resolve(REPO, args.src);
     const dstDir = path.resolve(REPO, args.dst);
-    if (!fs.existsSync(srcDir)) {
-        console.error(`Нет каталога-источника: ${srcDir} (это англ. клиент со всеми путями).`);
+    if (args.repair && !fs.existsSync(dstDir)) {
+        console.error(`Нет каталога: ${dstDir}.`);
         process.exit(1);
     }
 
-    console.log(`Источник путей: ${srcDir}`);
+    console.log(`Источник путей: ${args.repair ? dstDir : "index.html и модули скачиваемого клиента"}`);
     console.log(`Качаю с:        https://${args.host}/`);
     console.log(`Сохраняю в:     ${dstDir}`);
     if (args.only) console.log(`Только пути:    ${args.only}`);
 
-    let ip;
-    try { ip = await resolveIp(args.host, args.doh); }
-    catch (e) { console.error(`DoH не смог: ${e.message}`); process.exit(1); }
-    console.log(`Реальный IP ${args.host}: ${ip}\n`);
+    const result = await fetchAssets(args, { srcDir, dstDir });
+    if (args.dry) {
+        console.log(`[dry] Недостающих зависимостей: ${result.missing.length}. Реального скачивания нет.`);
+        return;
+    }
+    console.log(`\nГотово. Скачано: ${result.ok}, ошибок: ${result.failed}, обработано: ${result.done}.`);
+    console.log(`Русский клиент теперь в ${dstDir}. Запускай движок — он его подхватит.`);
+}
 
-    let files = walk(srcDir);
-    if (args.only) files = files.filter((f) => f.split(path.sep).join("/").startsWith(args.only));
-    // пропускаем уже скачанные
-    const todo = files.filter((rel) => !fs.existsSync(path.join(dstDir, rel)));
-    console.log(`Всего файлов: ${files.length}, к скачке: ${todo.length}, уже есть: ${files.length - todo.length}\n`);
-
+async function fetchAssets(args, { srcDir, dstDir, fetch = download, resolve = resolveIp, log = console.log }) {
+    const todo = [], seen = new Set();
+    const nativeBuild = fs.existsSync(path.join(dstDir, "index.html")) ||
+        fs.existsSync(path.join(srcDir, "index.html")) || !fs.existsSync(srcDir);
+    // Filters use a canonical nested base so either spelling selects the same game/pack.
+    const canonical = (rel) => rel.replace(/^main\/(pp\d+|ppad)-([^/]+)/, "main/$1/$2");
+    const prefix = args.only ? canonical(args.only.replace(/\/+$/, "")) : null;
+    const allowed = (rel) => {
+        const name = canonical(rel);
+        return !prefix || name === prefix || name.startsWith(prefix + "/") ||
+            (!args.repair && nativeBuild && (!name.startsWith("main/") || name.startsWith("main/@")));
+    };
+    const inspect = (rel) => {
+        if (!TEXT.has(path.posix.extname(rel).toLowerCase())) return;
+        try {
+            const content = fs.readFileSync(path.join(dstDir, rel), "utf8");
+            for (const reference of references(content, rel, args.host)) enqueue(reference);
+        } catch { /* A missing or unreadable file is handled by the download queue. */ }
+    };
+    const enqueue = (rel) => {
+        rel = rel.split(path.sep).join("/");
+        if (seen.has(rel) || !allowed(rel)) return;
+        seen.add(rel);
+        if (fs.existsSync(path.join(dstDir, rel))) inspect(rel);
+        else todo.push(rel);
+    };
+    if (nativeBuild || args.repair) {
+        if (fs.existsSync(dstDir)) {
+            for (const relative of walk(dstDir)) {
+                enqueue(relative);
+                // A cached root manifest can discover missing game files even with --only.
+                if (!relative.includes("/") && TEXT.has(path.posix.extname(relative))) inspect(relative);
+            }
+        }
+        if (!args.repair) enqueue("index.html");
+    } else {
+        // Legacy partial exports without an HTML entry point still use the explicit source tree.
+        for (const relative of walk(srcDir)) enqueue(relative);
+        if (fs.existsSync(dstDir)) for (const relative of walk(dstDir)) enqueue(relative);
+    }
+    log(`Проверено путей: ${seen.size}; к скачке: ${todo.length}. Ссылки из CSS/JS проверяются и в кэше.`);
+    if (args.dry) return { done: 0, ok: 0, failed: 0, missing: [...todo] };
+    let ip = null;
+    if (!args.noDoh && todo.length) {
+        try { ip = await resolve(args.host, args.doh); }
+        catch (e) { log(`DoH не смог: ${e.message} — подключаюсь напрямую.`); }
+    }
     let done = 0, ok = 0, failed = 0, idx = 0;
     async function worker() {
         while (idx < todo.length) {
             const rel = todo[idx++];
-            const r = await download(args.host, ip, rel, path.join(dstDir, rel));
+            const r = await fetch(args.host, ip, rel, path.join(dstDir, rel));
             done++;
-            if (r.ok) ok++;
-            else { failed++; if (failed <= 40) console.log(`  [${r.status || r.error}] ${rel}`); }
-            if (done % 100 === 0) console.log(`  …${done}/${todo.length} (ok ${ok}, ошибок ${failed})`);
+            if (r.ok) { ok++; inspect(rel); }
+            else { failed++; if (failed <= 40) log(`  [${r.status || r.error}] ${rel}`); }
+            if (done % 100 === 0) log(`  …${done}/${todo.length} (ok ${ok}, ошибок ${failed})`);
         }
     }
     await Promise.all(Array.from({ length: args.concurrency }, worker));
 
-    console.log(`\nГотово. Скачано: ${ok}, ошибок: ${failed}, обработано: ${done}.`);
-    console.log(`Русский клиент теперь в ${dstDir}. Запускай движок — он его подхватит.`);
+    return { done, ok, failed };
 }
 
-main().catch((e) => { console.error("Упал:", e); process.exit(1); });
+if (require.main === module) main().catch((e) => { console.error("Упал:", e); process.exit(1); });
+module.exports = { parseArgs, walk, download, fetchAssets };

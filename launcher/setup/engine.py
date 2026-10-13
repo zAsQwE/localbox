@@ -14,6 +14,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,7 @@ import threading
 from pathlib import Path
 
 from . import platform as plat
-from . import settings
+from . import settings, runtime
 
 
 def engine_dir() -> Path:
@@ -35,7 +36,7 @@ def client_dir() -> Path:
 
 def russian_client_dir() -> Path:
     """Русская оболочка (jackbox.ru/jackbox.fun). Если есть — основной клиент, а англ. client/ —
-    фоллбэк ассетов (хеши совпадают). Приоритет: client-ru, затем client-fun."""
+    фоллбэк для совпадающих путей. Приоритет: client-ru, затем client-fun."""
     for name in ("client-ru", "client-fun"):
         d = plat.repo_root() / name
         if d.exists():
@@ -47,13 +48,14 @@ def find_node() -> str | None:
     """Ищет node: встроенный runtime/ рядом с проектом -> PATH -> nvm -> прочие места."""
     exe = "node.exe" if plat.is_windows() else "node"
     # встроенный node (если положен в комплект сборки: <repo>/runtime/ или <repo>/runtime/bin/)
-    for p in (plat.repo_root() / "runtime" / exe, plat.repo_root() / "runtime" / "bin" / exe):
+    for p in [folder / exe for folder in runtime.binary_dirs()]:
         if p.exists():
             return str(p)
     node = shutil.which("node")
     if node:
         return node
-    candidates = sorted(glob.glob(str(Path.home() / ".nvm/versions/node/*/bin/node")), reverse=True)
+    candidates = sorted(glob.glob(str(Path.home() / ".nvm/versions/node/*/bin/node")),
+                        key=lambda p: tuple(map(int, re.findall(r"\d+", Path(p).parents[1].name))), reverse=True)
     candidates += [str(Path.home() / ".lmstudio/.internal/utils/node")]
     for c in candidates:
         if os.path.exists(c):
@@ -63,29 +65,46 @@ def find_node() -> str | None:
 
 def write_config(server_url: str, log=print) -> bool:
     """Создаёт server/config.json (serverUrl + пути к серту)."""
-    cfg = {
-        "serverUrl": server_url,
-        "ssl": {"cert": "../certs/localbox.pem", "key": "../certs/localbox-key.pem"},
-        "games": {"appTags": {}, "appIds": {}, "maxPlayers": {}, "minPlayers": {}},
-        "appConfigs": {},
-    }
-    (engine_dir() / "config.json").write_text(json.dumps(cfg, indent="\t", ensure_ascii=False), encoding="utf-8")
+    config_path = engine_dir() / "config.json"
+    try:
+        cfg = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        if not isinstance(cfg, dict):
+            raise ValueError("config.json должен содержать объект")
+        cfg["serverUrl"] = server_url
+        cfg.setdefault("ssl", {"cert": "../certs/localbox.pem", "key": "../certs/localbox-key.pem"})
+        cfg.setdefault("games", {"appTags": {}, "appIds": {}, "maxPlayers": {}, "minPlayers": {}})
+        cfg.setdefault("appConfigs", {})
+        tmp = config_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cfg, indent="\t", ensure_ascii=False), encoding="utf-8")
+        tmp.replace(config_path)
+    except (OSError, ValueError) as e:
+        log(f"Не удалось записать server/config.json: {e}")
+        return False
     log(f"server/config.json записан (serverUrl={server_url})")
     return True
 
 
 def deps_installed() -> bool:
-    return (engine_dir() / "node_modules" / "express").exists()
+    try:
+        deps = json.loads((engine_dir() / "package.json").read_text(encoding="utf-8"))["dependencies"]
+        return all((engine_dir() / "node_modules" / name / "package.json").is_file() for name in deps)
+    except (OSError, ValueError, KeyError):
+        return False
 
 
 def install_deps(log=print) -> bool:
-    npm = shutil.which("npm") or (str(Path(find_node()).parent / "npm") if find_node() else None)
+    node = find_node()
+    npm_name = "npm.cmd" if plat.is_windows() else "npm"
+    npm = shutil.which(npm_name) or (str(Path(node).parent / npm_name) if node else None)
     if not npm or not os.path.exists(npm):
         log("npm не найден. Установите Node.js.")
         return False
     log("Устанавливаю зависимости движка (npm i)… это может занять минуту")
+    env = os.environ.copy()
+    if node:
+        env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
     try:
-        p = subprocess.run([npm, "install"], cwd=str(engine_dir()), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        p = subprocess.run([npm, "install"], env=env, cwd=str(engine_dir()), capture_output=True, text=True, encoding="utf-8", errors="replace",
                            shell=plat.is_windows())
         if p.returncode != 0:
             log(p.stdout[-500:]); log(p.stderr[-500:])
@@ -104,6 +123,9 @@ def allow_privileged_ports(log=print) -> bool:
             "Просто нажмите «Запустить». Если порт занят — закройте IIS/Skype или запустите от администратора.")
         return True
     if plat.is_macos():
+        if plat.has_admin():
+            log("macOS: лаунчер уже запущен с правами root; порты 80/443 доступны.")
+            return True
         log("macOS: порты 80/443 требуют запуска от root (sudo). Запустите лаунчер через sudo, "
             "либо смените порты движка (нежелательно — игры ждут 80/443).")
         return False
@@ -112,9 +134,18 @@ def allow_privileged_ports(log=print) -> bool:
         log("node не найден.")
         return False
     real = os.path.realpath(node)
+    getcap = shutil.which("getcap")
+    if getcap:
+        try:
+            current = subprocess.run([getcap, real], capture_output=True, text=True, timeout=10)
+            if "cap_net_bind_service" in current.stdout:
+                log(f"Порты 80/443 уже разрешены для node ({real}).")
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
     cmd = ["setcap", "cap_net_bind_service=+ep", real]
-    runner = ["pkexec"] if shutil.which("pkexec") else (["sudo"] if shutil.which("sudo") else None)
-    if not runner:
+    runner = [] if plat.has_admin() else (["pkexec"] if shutil.which("pkexec") else (["sudo"] if shutil.which("sudo") else None))
+    if runner is None:
         log("Нужен pkexec или sudo. Вручную: sudo setcap cap_net_bind_service=+ep " + real)
         return False
     try:
@@ -149,47 +180,27 @@ class EngineProcess:
         if not node:
             self.on_log("node не найден. Установите Node.js (https://nodejs.org).")
             return False
-        # Прибиваем зависший прошлый сервер и освобождаем его порты (переживают краши). best-effort.
-        # pkill/fuser — юниксовые утилиты, на Windows их нет (тихо ничего не делали бы) — там
-        # то же самое через PowerShell (по имени файла в командной строке / по владельцу порта).
-        if plat.is_windows():
-            ps_cmds = (
-                "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | "
-                "Where-Object { $_.CommandLine -like '*server.js*' } | "
-                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
-                "Get-NetTCPConnection -LocalPort 38202 -ErrorAction SilentlyContinue | "
-                "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
-                "Get-NetTCPConnection -LocalPort 38203 -ErrorAction SilentlyContinue | "
-                "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
-            )
-            for ps in ps_cmds:
-                try:
-                    subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=8)
-                except Exception:  # noqa: BLE001
-                    pass
-        else:
-            for cmd in (
-                ["pkill", "-9", "-f", "server/server.js"],
-                ["fuser", "-k", "-9", "38202/tcp"],
-                ["fuser", "-k", "-9", "38203/tcp"],
-            ):
-                try:
-                    subprocess.run(cmd, capture_output=True, timeout=5)
-                except Exception:  # noqa: BLE001
-                    pass
         env = os.environ.copy()
         env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
         # TTS: движок и голос из настроек + python для Silero-воркера (тот же, что у лаунчера).
         _s = settings.load()
+        if _s.get("auto_start_full", False):
+            env["LOCALBOX_AUTO_START_FULL"] = "1"
+            self.on_log("Автостарт включён: игра запустится, когда комната заполнится.")
+        if not _s.get("download_missing", True):
+            env.pop("LOCALBOX_FETCH_ORIGIN", None)
         env["LOCALBOX_TTS_ENGINE"] = _s.get("tts_engine", "auto")
         env["LOCALBOX_TTS_VOICE"] = _s.get("tts_voice", "eugene")
         _tts_py = (_s.get("tts_python") or "").strip()
         env["LOCALBOX_PYTHON"] = _tts_py or (sys.executable if not getattr(sys, "frozen", False) else (shutil.which("python3") or "python3"))
         # Додо Ре Ми: включаем локальный рендер выступления, если в настройках включено
         # (либо если флаг уже задан в окружении, напр. из start-server.bat).
-        if _s.get("dodo_render") or os.environ.get("LOCALBOX_DODO") == "1":
+        dodo = os.environ.get("LOCALBOX_DODO")
+        if dodo == "1" or (dodo != "0" and _s.get("dodo_render")):
             env["LOCALBOX_DODO"] = "1"
             self.on_log("Додо Ре Ми: поддержка включена (локальный рендер выступления, нужен ffmpeg).")
+        else:
+            env.pop("LOCALBOX_DODO", None)
         # Громкость рендера Додо Ре Ми (инструмент / бэкинг).
         env["LOCALBOX_RENDER_INSTR"] = str(_s.get("render_instr", 4.0))
         env["LOCALBOX_RENDER_BACKING"] = str(_s.get("render_backing", 0.45))
@@ -197,13 +208,14 @@ class EngineProcess:
         _admins = (_s.get("admin_nicks") or os.environ.get("LOCALBOX_ADMINS") or "").strip()
         if _admins:
             env["LOCALBOX_ADMINS"] = _admins
+            _content = (_s.get("cheat_content_dir") or "").strip()
+            if _content:
+                env["LOCALBOX_CHEAT_CONTENT"] = _content
             # Показ «правильного ответа» / «цены картины» — по настройке (по умолчанию включены).
-            if not _s.get("cheat_answer", True):
-                env["LOCALBOX_CHEAT_ANSWER"] = "0"
-            if not _s.get("cheat_price", True):
-                env["LOCALBOX_CHEAT_PRICE"] = "0"
-            if not _s.get("cheat_highlight", True):
-                env["LOCALBOX_CHEAT_HIGHLIGHT"] = "0"
+            for option, variable in (("cheat_answer", "LOCALBOX_CHEAT_ANSWER"),
+                                     ("cheat_price", "LOCALBOX_CHEAT_PRICE"),
+                                     ("cheat_highlight", "LOCALBOX_CHEAT_HIGHLIGHT")):
+                env[variable] = "1" if _s.get(option, True) else "0"
             self.on_log(f"Читы включены для: {_admins} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).")
         # Фиксированный код комнаты (свой/русский), если задан. В ВЕРХНЕМ регистре — клиент при вводе
         # всё равно апперкейсит код, иначе набранный «игра» не совпадёт с комнатой «Игра».
@@ -221,11 +233,12 @@ class EngineProcess:
             env["LOCALBOX_CLIENT_FALLBACK"] = str(client_dir())
             # Докачка фирменных ассетов (задники/логотипы/«ячейки») с исходного сайта — по настройке.
             # Выключено = полностью локально (движок не ходит на jackbox.ru).
-            if settings.load().get("download_missing", True):
+            if _s.get("download_missing", True):
                 origin = "https://jackbox.fun" if rc.name == "client-fun" else "https://jackbox.ru"
                 env["LOCALBOX_FETCH_ORIGIN"] = origin
                 self.on_log(f"Клиент: русский ({rc.name}) + фоллбэк client/ + докачка недостающего с {origin}")
             else:
+                env.pop("LOCALBOX_FETCH_ORIGIN", None)
                 self.on_log(f"Клиент: русский ({rc.name}) + фоллбэк client/ — полностью локально (без докачки)")
         else:
             env["LOCALBOX_CLIENT_DIR"] = str(client_dir())
@@ -238,13 +251,13 @@ class EngineProcess:
         except Exception as e:  # noqa: BLE001
             self.on_log(f"Не удалось запустить движок: {e}")
             return False
-        threading.Thread(target=self._pump, daemon=True).start()
+        threading.Thread(target=self._pump, args=(self.proc,), daemon=True).start()
         self.on_log("Движок запускается…")
         return True
 
-    def _pump(self):
+    def _pump(self, proc):
         try:
-            for line in self.proc.stdout:
+            for line in proc.stdout:
                 self.on_log(line.rstrip("\n"))
         except Exception:  # noqa: BLE001
             pass
@@ -253,8 +266,12 @@ class EngineProcess:
     def stop(self):
         if not self.is_running():
             return
-        self.proc.terminate()
+        proc = self.proc
         try:
-            self.proc.wait(timeout=5)
+            proc.terminate()
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            self.proc.kill()
+            proc.kill()
+            proc.wait()
+        except ProcessLookupError:
+            pass

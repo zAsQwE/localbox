@@ -15,16 +15,21 @@ from pathlib import Path
 from . import platform as plat
 
 DEFAULTS = {
+    "server_url": plat.local_ip(),  # адрес, который игра получает через -jbg.config serverUrl=...
+    "qr_overlay": True,       # QR активной комнаты поверх игры в правом нижнем углу
+    "auto_start_full": False, # нажать VIP-действие start, когда комната заполнена
     "download_missing": True,
     "tts_engine": "auto",   # auto | silero | piper | espeak | silent
     "tts_voice": "eugene",  # голос Silero: eugene | baya | kseniya | xenia | aidar | random
     "tts_python": "",       # путь к python с TTS-библиотеками (напр. venv на 3.11); пусто = python лаунчера
+    "jackbox10_path": "",   # папка установленного Jackbox 10 или songs для импорта музыки
     "dodo_render": False,   # поддержка Додо Ре Ми (nopus-opus): локальный рендер выступления (нужен ffmpeg)
     "render_instr": 4.0,    # громкость инструмента в рендере Додо Ре Ми (LOCALBOX_RENDER_INSTR)
     "render_backing": 0.45, # громкость бэкинга (0..1) в рендере (LOCALBOX_RENDER_BACKING)
     "admin_nicks": "",      # ники (через запятую), которым доступны читы (оверлей в игре)
+    "cheat_content_dir": "", # папка игры/Jackbox или steamapps/common; пусто = поиск в библиотеках Steam
     "cheat_answer": True,   # показывать «правильный ответ» списком в панели читов
-    "cheat_highlight": True,  # подсвечивать правильный вариант прямо на кнопке в игре (все викторины)
+    "cheat_highlight": True,  # подсвечивать найденные правильные варианты на кнопках
     "cheat_price": True,    # показывать цену картины (Дуракцион) пульсирующим ценником у картины
     "room_code": "",        # фиксированный код комнаты (пусто = случайный); можно свой/русский
 }

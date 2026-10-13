@@ -11,6 +11,7 @@ const u = require("./util.js");
 const mgr = require("./room.js");
 const state = require("./state.js");
 const artifacts = require("./artifacts.js");
+const network = require("./network.js");
 
 const router = express.Router();
 const CONTENT_DIR = path.join(__dirname, "..", "storage", "content");
@@ -36,7 +37,7 @@ router.all(["/socket.io/1", "/socket.io/1/"], (req, res) => {
     res.send(token + ":60:60:websocket");
 });
 
-router.get("/room", (req, res) => res.send({ create: true, server: state.serverUrl }));
+router.get("/room", (req, res) => res.send({ create: true, server: network.address(req, state.serverUrl).host }));
 
 router.get("/room/:roomId", (req, res) => {
     const room = mgr.get(req.params.roomId);
@@ -44,7 +45,7 @@ router.get("/room/:roomId", (req, res) => {
     let joinAs = "player";
     if (room.isFull() || room.locked) joinAs = room.findByUserId(req.query.userId) ? "player" : (room.audienceEnabled ? "audience" : "full");
     res.send({
-        roomid: room.code, server: state.serverUrl, apptag: room.appTag, appid: room.appId,
+        roomid: room.code, server: network.address(req, state.serverUrl).host, apptag: room.appTag, appid: room.appId,
         numAudience: room.audienceCount, audienceEnabled: room.audienceEnabled, joinAs,
         requiresPassword: !!room.password,
     });
@@ -85,6 +86,7 @@ router.post("/storage/content", (req, res) => {
     res.send(Object.assign({ success: true, contentId: id }, doc));
 });
 router.get("/storage/content/:id", (req, res) => {
+    if (!/^[A-Z]{7}$/.test(req.params.id)) return res.status(404).send({ success: false, error: "Invalid User Content ID", error_code: 2005 });
     const f = path.join(CONTENT_DIR, req.params.id + ".json");
     if (!fs.existsSync(f)) return res.status(404).send({ success: false, error: "Invalid User Content ID", error_code: 2005 });
     const c = JSON.parse(fs.readFileSync(f, "utf8"));
