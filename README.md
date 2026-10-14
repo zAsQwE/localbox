@@ -2,7 +2,7 @@
 
 Локальный сервер для игр Jackbox с веб-клиентом, озвучкой и поддержкой Додо Ре Ми.
 
-[Скачать](https://github.com/zAsQwE/localbox/releases) · [Telegram](https://t.me/lacalbox) · [Видео для Windows](https://youtu.be/kZr1dSFpLWc)
+[Скачать](https://github.com/zAsQwE/localbox/releases) · [Telegram](https://t.me/lacalbox)
 
 ## Установка
 
