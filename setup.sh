@@ -2,6 +2,29 @@
 # Linux/macOS: графический мастер; без дисплея — те же вопросы текстом.
 set -euo pipefail
 LOCALBOX_SOURCE="$(cd "$(dirname "$0")" && pwd)"
+use_release=0
+show_help=0
+[ -z "${LOCALBOX_BUNDLE_SOURCE:-}" ] || use_release=1
+for argument in "$@"; do
+    case "$argument" in
+        --latest) use_release=1 ;;
+        --local) use_release=0 ;;
+        --help|-h) show_help=1 ;;
+    esac
+done
+[ "$show_help" = 0 ] || use_release=0
+if [ "$use_release" = 1 ] && [ "${LOCALBOX_RELEASE_READY:-0}" != 1 ]; then
+    bash "$LOCALBOX_SOURCE/installer/linux-deps.sh" --python
+    localbox_release_work=$(mktemp -d "${TMPDIR:-/tmp}/localbox-release-setup.XXXXXX")
+    trap 'rm -rf "$localbox_release_work"' EXIT HUP INT TERM
+    python3 "$LOCALBOX_SOURCE/installer/release.py" --destination "$localbox_release_work"
+    export LOCALBOX_BUNDLE_SOURCE="$localbox_release_work/payload"
+    export LOCALBOX_RELEASE_READY=1
+    bash "$LOCALBOX_BUNDLE_SOURCE/setup.sh" "$@"
+    exit $?
+fi
+source "$LOCALBOX_SOURCE/installer/find-node.sh"
+localbox_use_node || true
 mode=auto
 target="${LOCALBOX_BUNDLE_SOURCE:+$HOME/.local/share/localbox}"
 target="${target:-$LOCALBOX_SOURCE}"
@@ -16,7 +39,7 @@ russian=0
 run_after=0
 noninteractive=0
 usage() {
-    printf '%s\n' 'setup.sh [--gui|--console] [--target ПАПКА] [--runtime ПАПКА] [--tts none|piper|silero|both|espeak]' \
+    printf '%s\n' 'setup.sh [--latest|--local] [--gui|--console] [--target ПАПКА] [--runtime ПАПКА] [--tts none|piper|silero|both|espeak]' \
         '         [--voices ru_RU-denis-medium,ru_RU-irina-medium] [--game ПАПКА_JACKBOX10] [--cheat-content ПАПКА_ИГР] [--dodo] [--ru] [--run]' \
         'Установка с параметрами --target или --tts не задаёт вопросов.'
 }
@@ -25,6 +48,7 @@ while [ "$#" -gt 0 ]; do
         --help|-h) usage; exit 0 ;;
         --gui) mode=gui ;;
         --console) mode=console ;;
+        --latest|--local) ;; # Already handled before starting the selected release.
         --target|--runtime|--tts|--voices|--game|--cheat-content)
             if [ "$#" -lt 2 ]; then usage >&2; exit 2; fi
             key="$1"; shift

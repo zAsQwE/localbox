@@ -3,6 +3,8 @@
 set -euo pipefail
 mode="${1:---full}"
 tts="${2:-piper}"
+source "$(dirname "$0")/find-node.sh"
+localbox_use_node || true
 packages=()
 pm=""
 for candidate in apt-get pacman dnf zypper brew; do
@@ -14,7 +16,7 @@ add() {
         dnf) packages+=( $3 ) ;; zypper) packages+=( $4 ) ;; brew) packages+=( $5 ) ;;
     esac
 }
-command -v python3 >/dev/null 2>&1 || add python3 python python3 python3 python
+python3 -c 'import sys; assert sys.version_info >= (3,10)' >/dev/null 2>&1 || add python3 python python3 python3 python
 if [ "$mode" = "--gui" ] || [ "$mode" = "--full" ]; then
     python3 -c 'import tkinter' >/dev/null 2>&1 || add python3-tk tk python3-tkinter python3-tk python-tk
 fi
@@ -23,6 +25,9 @@ if [ "$mode" = "--full" ]; then
         add 'nodejs npm' 'nodejs npm' 'nodejs npm' 'nodejs npm' node
     fi
     command -v npm >/dev/null 2>&1 || add npm npm npm npm node
+    if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+        printf 'Использую установленные Node.js и npm: %s\n' "$(command -v node)"
+    fi
     command -v git >/dev/null 2>&1 || add git git git git git
     command -v ffmpeg >/dev/null 2>&1 || add ffmpeg ffmpeg ffmpeg ffmpeg ffmpeg
     command -v openssl >/dev/null 2>&1 || add openssl openssl openssl openssl openssl

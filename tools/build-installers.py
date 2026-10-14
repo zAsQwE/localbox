@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Сборка Windows setup.exe (NSIS) и самораспаковывающегося Linux setup-linux.run."""
+"""Сборка setup.exe, setup-linux.run и общего архива обновления LocalBox."""
 
 import argparse
 import hashlib
@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "installer"))
@@ -49,7 +50,7 @@ __LOCALBOX_PAYLOAD__
     output.chmod(0o755)
 
 
-def build(output_dir=None, windows=True, linux=True, makensis=None):
+def build(output_dir=None, windows=True, linux=True, makensis=None, version=None):
     output_dir = Path(output_dir or ROOT / "dist").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     compiler = makensis or os.environ.get("MAKENSIS") or shutil.which("makensis")
@@ -62,6 +63,11 @@ def build(output_dir=None, windows=True, linux=True, makensis=None):
             target = stage / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, target)
+        if version:
+            sys.path.insert(0, str(ROOT / "installer"))
+            from update import version_tuple
+            version_tuple(version)
+            (stage / "version.json").write_text(json.dumps({"version": version.lstrip("v")}, indent=2) + "\n", encoding="utf-8")
         manifest = {str(path.relative_to(stage)): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in sorted(stage.rglob("*")) if path.is_file()}
         (stage / "installer" / "payload-sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -70,7 +76,12 @@ def build(output_dir=None, windows=True, linux=True, makensis=None):
                             f"-DOUTPUT_FILE={output_dir / 'setup.exe'}", str(ROOT / "installer" / "localbox.nsi")], check=True)
         if linux:
             linux_bundle(stage, output_dir / "setup-linux.run")
+        with zipfile.ZipFile(output_dir / "localbox-update.zip", "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(stage.rglob("*")):
+                if path.is_file():
+                    archive.write(path, str(path.relative_to(stage)))
     artifacts = [output_dir / name for enabled, name in ((windows, "setup.exe"), (linux, "setup-linux.run")) if enabled]
+    artifacts.append(output_dir / "localbox-update.zip")
     (output_dir / "SHA256SUMS").write_text("".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in artifacts), encoding="utf-8")
     for path in artifacts:
         print(f"Готово: {path} ({path.stat().st_size:,} байт)")
@@ -81,13 +92,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir")
     parser.add_argument("--makensis")
+    parser.add_argument("--version", help="Версия будущего Release, например v1.2.0; по умолчанию version.json")
     parser.add_argument("--linux-only", action="store_true")
     parser.add_argument("--windows-only", action="store_true")
     args = parser.parse_args()
     if args.linux_only and args.windows_only:
         parser.error("Выберите один фильтр платформы.")
     try:
-        build(args.output_dir, not args.linux_only, not args.windows_only, args.makensis)
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        build(args.output_dir, not args.linux_only, not args.windows_only, args.makensis, args.version)
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from install import install, songs_directory, PIPER_VOICES, SOURCE, read_json
 from theme import detect_dark
+from window import fit_window
 
 
 def run_wizard(target=None, runtime=None, game=None, dodo=False, russian=False, run_after=False,
@@ -20,8 +21,7 @@ def run_wizard(target=None, runtime=None, game=None, dodo=False, russian=False, 
 
     root = tk.Tk()
     root.title("LocalBox")
-    root.geometry("680x680")
-    root.minsize(640, 620)
+    fit_window(root)
     font = nametofont("TkDefaultFont").actual("family")
     style = ttk.Style(root)
     style.theme_use("clam")
@@ -76,6 +76,12 @@ def run_wizard(target=None, runtime=None, game=None, dodo=False, russian=False, 
     settings.bind("<Configure>", resize_settings)
     def resize_canvas(event):
         canvas.itemconfigure(settings_window, width=event.width)
+        for widget in settings.winfo_children():
+            if isinstance(widget, ttk.Label):
+                widget.configure(wraplength=max(160, event.width - 8))
+        columns = 2 if event.width < 460 else 4
+        for index, check in enumerate(voice_checks):
+            check.grid_configure(row=index // columns, column=index % columns)
         resize_settings()
     canvas.bind("<Configure>", resize_canvas)
     def scroll_settings(event):
@@ -149,6 +155,21 @@ def run_wizard(target=None, runtime=None, game=None, dodo=False, russian=False, 
         check = ttk.Checkbutton(voice_frame, text=label, variable=value)
         check.grid(row=0, column=index, padx=(0, 18))
         voice_checks.append(check)
+    footer_layout = [None]
+    def resize_footer(event):
+        narrow = event.width < 480
+        if narrow != footer_layout[0]:
+            footer_layout[0] = narrow
+            status_label.pack_forget()
+            action.pack_forget()
+            if narrow:
+                status_label.pack(fill="x", pady=(0, 8))
+                action.pack(fill="x")
+            else:
+                status_label.pack(side="left", fill="x", expand=True, padx=(0, 16))
+                action.pack(side="right")
+        status_label.configure(wraplength=max(100, event.width - (0 if narrow else action.winfo_reqwidth() + 16)))
+    footer.bind("<Configure>", resize_footer)
     tts_hint = tk.StringVar()
     ttk.Label(settings, textvariable=tts_hint, style="Muted.TLabel", wraplength=600).grid(
         row=7, column=0, columnspan=2, sticky="w", pady=(3, 0))

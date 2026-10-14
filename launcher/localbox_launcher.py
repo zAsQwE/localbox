@@ -20,7 +20,7 @@ import sys
 import threading
 
 from setup import platform as plat
-from setup import certs, engine, settings, tts_preview, runtime, qr, dodo
+from setup import certs, engine, settings, tts_preview, runtime, qr, dodo, updates
 
 
 def run_gui():
@@ -158,6 +158,7 @@ def run_gui():
 
     ui_q = queue.Queue()
     closing = threading.Event()
+    scheduled_jobs = {"drain": None, "qr": None}
     def call_ui(_delay, callback):
         if not closing.is_set():
             ui_q.put(callback)
@@ -187,6 +188,10 @@ def run_gui():
 
     settings_btn = RoundedButton(header, "Настройки", width=112, height=42, radius=12)
     settings_btn.pack(side="right", anchor="center")
+
+    update_state = {"release": None, "busy": False}
+    update_btn = ttk.Button(header, text="Проверить обновления")
+    update_btn.pack(side="right", anchor="center", padx=(0, 8))
 
     feedback_var = tk.StringVar(value="Готово к запуску")
     footer = tk.Frame(outer, bg=BG)
@@ -303,14 +308,18 @@ def run_gui():
         start_btn.set_enabled(not starting)
 
     def drain():
+        if closing.is_set():
+            return
         while not ui_q.empty():
             try:
                 ui_q.get_nowait()()
             except tk.TclError:
                 pass  # A settings window may already have been closed.
+            if closing.is_set():
+                return
         if state["engine"] and not state["engine"].is_running():
             on_stop()
-        root.after(150, drain)
+        scheduled_jobs["drain"] = root.after(150, drain)
 
     def in_thread(fn, button=None):
         def enable_button():
@@ -432,9 +441,12 @@ def run_gui():
                 finally:
                     state["qr_busy"] = False
             threading.Thread(target=fetch_status, daemon=True).start()
-        root.after(1000, poll_qr)
+        scheduled_jobs["qr"] = root.after(1000, poll_qr)
 
     def on_start():
+        if update_state["busy"]:
+            feedback_var.set("Дождитесь окончания проверки или загрузки обновления.")
+            return
         if state["engine"]:
             on_stop()
             return
@@ -886,8 +898,62 @@ def run_gui():
     start_btn.set_command(on_start)
     settings_btn.set_command(open_settings)
 
+    def on_update():
+        if update_state["busy"] or state["starting"]:
+            return
+        update_state["busy"] = True
+        update_btn.configure(state="disabled")
+        release = update_state["release"]
+        feedback_var.set("Скачиваю обновление…" if release else "Проверяю новые Releases…")
+        def work():
+            directory = None
+            handed_off = False
+            try:
+                manager = updates.updater()
+                if release is None:
+                    available = manager.latest_release(plat.repo_root())
+                    def checked():
+                        update_state["release"] = available
+                        if available:
+                            update_btn.configure(text=f"Обновить до {available['tag_name']}")
+                            feedback_var.set("Доступна новая версия. Кнопка обновления установит её и перезапустит лаунчер.")
+                        else:
+                            feedback_var.set(f"Новых выпусков нет. LocalBox {manager.current_version(plat.repo_root())}.")
+                    call_ui(0, checked)
+                else:
+                    directory = updates.temporary_directory()
+                    archive = manager.download_release(release, directory / manager.ASSET_NAME, log)
+                    if closing.is_set():
+                        return
+                    def ready():
+                        try:
+                            on_stop()
+                            updates.launch(archive, release["tag_name"], directory)
+                            on_close()
+                        except Exception as error:
+                            import shutil
+                            shutil.rmtree(directory, ignore_errors=True)
+                            log(f"Не удалось запустить обновление: {error}")
+                    call_ui(0, ready)
+                    handed_off = True
+            except Exception as error:
+                log(f"Не удалось обновить LocalBox: {error}")
+            finally:
+                if directory is not None and not handed_off:
+                    import shutil
+                    shutil.rmtree(directory, ignore_errors=True)
+                def finished():
+                    update_state["busy"] = False
+                    update_btn.configure(state="normal")
+                call_ui(0, finished)
+        threading.Thread(target=work, daemon=True).start()
+    update_btn.configure(command=on_update)
+
     def on_close():
         closing.set()
+        for job in scheduled_jobs.values():
+            if job is not None:
+                root.after_cancel(job)
         on_stop(); root.destroy()
     root.protocol("WM_DELETE_WINDOW", on_close)
 

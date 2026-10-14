@@ -1,5 +1,10 @@
 ﻿# PowerShell 5.1; пути читаем как данные, в том числе при отдельной папке runtime.
 $ErrorActionPreference = 'Stop'
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
+try { [Console]::InputEncoding = $OutputEncoding } catch { }
+try { [Console]::OutputEncoding = $OutputEncoding } catch { }
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 $root = Split-Path $PSScriptRoot -Parent
 $manifest = Join-Path $root 'launcher\install-paths.json'
 $python = $null
@@ -27,7 +32,5 @@ if (-not $python) {
     }
 }
 if (-not $python) { Write-Host 'Python не найден. Запустите setup.exe или install.bat.'; exit 1 }
-$env:PYTHONUTF8 = '1'
-$env:PYTHONIOENCODING = 'utf-8'
 & $python (Join-Path $root 'launcher\start.py') @args
 exit $LASTEXITCODE

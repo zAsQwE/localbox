@@ -2,6 +2,8 @@
 setlocal DisableDelayedExpansion
 cd /d "%~dp0"
 chcp 65001 >nul
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 if exist "%~dp0dist\setup.exe" goto DIST_SETUP
 if exist "%~dp0setup.exe" goto ROOT_SETUP
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows-bootstrap.ps1" -Prompt

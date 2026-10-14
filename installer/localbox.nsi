@@ -26,6 +26,6 @@ Section "LocalBox"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR\payload"
   File /r "${PAYLOAD_DIR}/*"
-  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\payload\installer\windows-ui.ps1" -Source "$PLUGINSDIR\payload"' $0
+  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\payload\installer\windows-ui.ps1" -Source "$PLUGINSDIR\payload" -Latest' $0
   SetErrorLevel $0
 SectionEnd

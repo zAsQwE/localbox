@@ -2,6 +2,7 @@
 param([string]$Root = '', [string]$OptionsFile = '', [switch]$Prompt)
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
+try { [Console]::InputEncoding = $OutputEncoding } catch { }
 try { [Console]::OutputEncoding = $OutputEncoding } catch { }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $env:PYTHONUTF8 = '1'
@@ -62,24 +63,13 @@ function Run-SignedInstaller([string]$File, [string]$Arguments, [bool]$Elevate =
     if ($process.ExitCode -notin @(0, 3010, 1641, 1638)) { throw "Установщик $File завершился с кодом $($process.ExitCode)" }
 }
 
-function Find-Python {
-    $candidates = @((Join-Path $runtime 'python\python.exe'))
-    foreach ($base in @('HKCU:\Software\Python\PythonCore', 'HKLM:\Software\Python\PythonCore')) {
-        foreach ($version in @('3.12', '3.13', '3.11', '3.10')) {
-            $item = Get-ItemProperty "$base\$version\InstallPath" -ErrorAction SilentlyContinue
-            if ($item) { $candidates += Join-Path $item.'(default)' 'python.exe' }
-        }
-    }
-    foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate) {
-            try {
-                & $candidate -c 'import sys,tkinter,venv,ensurepip; assert (3,10) <= sys.version_info < (3,14) and sys.maxsize > 2**32' 2>$null
-                if ($LASTEXITCODE -eq 0) { return $candidate }
-            } catch { continue }
-        }
-    }
-    return $null
+$previous = @{}
+$pathsFile = Join-Path $Root 'launcher\install-paths.json'
+if (Test-Path -LiteralPath $pathsFile) {
+    $saved = Get-Content -LiteralPath $pathsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($property in $saved.PSObject.Properties) { $previous[$property.Name] = $property.Value }
 }
+. (Join-Path $PSScriptRoot 'windows-discovery.ps1')
 
 try {
     Start-Transcript -Path $logfile -Append | Out-Null
@@ -108,7 +98,9 @@ try {
         $python = Find-Python
         if (-not $python) { throw 'Python с tkinter не найден после установки.' }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $runtime 'node\node.exe'))) {
+    Write-Host "Python: $python"
+    $nodeTools = Find-Node
+    if (-not $nodeTools) {
         $checksums = Invoke-RestMethod 'https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt'
         $match = [regex]::Match($checksums, '(?m)^([a-f0-9]{64})\s+(node-v[0-9.]+-win-x64.zip)\s*$')
         if (-not $match.Success) { throw 'Не найден официальный Windows-архив Node.js.' }
@@ -121,8 +113,12 @@ try {
         $folder = Join-Path $stage $filename.Replace('.zip', '')
         New-Item -ItemType Directory -Force -Path (Join-Path $runtime 'node') | Out-Null
         Copy-Item -Path (Join-Path $folder '*') -Destination (Join-Path $runtime 'node') -Recurse -Force
+        $nodeTools = Find-Node
+        if (-not $nodeTools) { throw 'Node.js 18+ и npm не найдены после установки.' }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $runtime 'ffmpeg\bin\ffmpeg.exe'))) {
+    Write-Host "Использую Node.js: $($nodeTools.node)"
+    $ffmpeg = Find-WorkingTool 'ffmpeg.exe' @($previous.ffmpeg, (Join-Path $runtime 'ffmpeg\bin\ffmpeg.exe')) @('-version')
+    if (-not $ffmpeg) {
         $hashText = Invoke-RestMethod 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256'
         $hash = [regex]::Match($hashText, '[a-fA-F0-9]{64}').Value
         if (-not $hash) { throw 'Не найдена SHA-256 ffmpeg.' }
@@ -134,8 +130,14 @@ try {
         if (-not $exe) { throw 'ffmpeg.exe отсутствует в архиве.' }
         New-Item -ItemType Directory -Force -Path (Join-Path $runtime 'ffmpeg') | Out-Null
         Copy-Item -Path (Join-Path $exe.Directory.Parent.FullName '*') -Destination (Join-Path $runtime 'ffmpeg') -Recurse -Force
+        $ffmpeg = Join-Path $runtime 'ffmpeg\bin\ffmpeg.exe'
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $runtime 'git\cmd\git.exe'))) {
+    $gitCandidates = @($previous.git, (Join-Path $runtime 'git\cmd\git.exe'))
+    foreach ($base in @($env:ProgramFiles, $env:LOCALAPPDATA)) {
+        if ($base) { $gitCandidates += Join-Path $base 'Git\cmd\git.exe'; $gitCandidates += Join-Path $base 'Programs\Git\cmd\git.exe' }
+    }
+    $git = Find-WorkingTool 'git.exe' $gitCandidates
+    if (-not $git) {
         $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{'User-Agent' = 'LocalBox-Setup'}
         $asset = $release.assets | Where-Object { $_.name -match '^MinGit-[0-9.]+-64-bit.zip$' } | Select-Object -First 1
         if (-not $asset -or $asset.digest -notmatch '^sha256:([a-fA-F0-9]{64})$') { throw 'Не найдена официальная сборка MinGit с SHA-256.' }
@@ -143,15 +145,20 @@ try {
         $archive = Join-Path $cache $asset.name
         Download-File $asset.browser_download_url $archive $hash
         Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $runtime 'git') -Force
+        $git = Join-Path $runtime 'git\cmd\git.exe'
     }
     # MinGit не включает openssl.exe; mkcert создаёт локальные TLS-сертификаты без установки CA.
-    $mkcert = Join-Path $runtime 'bin\mkcert.exe'
-    if (-not (Test-Path -LiteralPath $mkcert)) {
+    $openssl = Find-WorkingTool 'openssl.exe' @($previous.openssl, (Join-Path (Split-Path (Split-Path $git -Parent) -Parent) 'usr\bin\openssl.exe')) @('version')
+    $mkcert = Find-WorkingTool 'mkcert.exe' @($previous.mkcert, (Join-Path $runtime 'bin\mkcert.exe')) @('-version')
+    if (-not $openssl -and -not $mkcert) {
+        $mkcert = Join-Path $runtime 'bin\mkcert.exe'
         New-Item -ItemType Directory -Force -Path (Split-Path $mkcert -Parent) | Out-Null
         Download-File 'https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe' $mkcert
     }
-    & $mkcert -version
-    if ($LASTEXITCODE -ne 0) { throw 'Не запускается mkcert.' }
+    if ($mkcert) {
+        & $mkcert -version
+        if ($LASTEXITCODE -ne 0) { throw 'Не запускается mkcert.' }
+    }
     if ($options.tts -in @('piper', 'both')) {
         $system64 = "$env:SystemRoot\System32"
         if (-not [Environment]::Is64BitProcess) { $system64 = "$env:SystemRoot\Sysnative" }
@@ -162,8 +169,15 @@ try {
         }
     }
     $env:PATH = "$runtime\bin;$runtime\node;$runtime\git\cmd;$runtime\git\ucrt64\bin;$runtime\git\mingw64\bin;$runtime\ffmpeg\bin;$env:PATH"
+    foreach ($tool in @($nodeTools.node, $nodeTools.npm, $git, $ffmpeg, $openssl, $mkcert)) {
+        if ($tool) { $env:PATH = (Split-Path $tool -Parent) + ';' + $env:PATH }
+    }
     $manifest = Join-Path $Root 'launcher\install-paths.json'
-    @{runtime = $runtime; python = $python} | ConvertTo-Json | Set-Content -LiteralPath $manifest -Encoding UTF8
+    $previous.runtime = $runtime; $previous.python = $python
+    $previous.node = $nodeTools.node; $previous.npm = $nodeTools.npm
+    $previous.git = $git; $previous.ffmpeg = $ffmpeg
+    $previous.openssl = $openssl; $previous.mkcert = $mkcert
+    $previous | ConvertTo-Json | Set-Content -LiteralPath $manifest -Encoding UTF8
     $installArgs = @((Join-Path $Root 'installer\install.py'), '--target', $Root, '--runtime', $runtime,
                          '--tts', $options.tts, '--voices', $options.voices, '--skip-system-deps')
         if ($null -ne $options.cheat_content) { $installArgs += ('--cheat-content=' + $options.cheat_content) }

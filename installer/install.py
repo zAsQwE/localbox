@@ -15,7 +15,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "launcher"))
 from setup.dodo import songs_directory, import_dodo
 PIPER_VOICES = ("ru_RU-denis-medium", "ru_RU-dmitri-medium", "ru_RU-irina-medium", "ru_RU-ruslan-medium")
-ROOT_FILES = ("LICENSE", "README.md", "start-server.sh", "start-server.bat", "setup.sh", "install.bat")
+ROOT_FILES = ("LICENSE", "README.md", "start-server.sh", "start-server.bat", "setup.sh", "install.bat", "version.json")
 
 
 def payload_files(source=SOURCE):
@@ -179,12 +179,25 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     extra = [runtime_dir, runtime_dir / "bin", runtime_dir / "node", runtime_dir / "git" / "cmd",
              runtime_dir / "git" / "ucrt64" / "bin", runtime_dir / "git" / "mingw64" / "bin",
              runtime_dir / "ffmpeg" / "bin"]
+    selected = [Path(manifest[name]).parent for name in ("node", "npm", "git", "ffmpeg", "openssl", "mkcert")
+                if manifest.get(name) and Path(manifest[name]).is_file()]
+    if os.name != "nt":
+        node = shutil.which("node")
+        if node:
+            selected.insert(0, Path(node).parent)
+    extra = selected + extra
     env = {**os.environ, "PATH": os.pathsep.join(str(p) for p in extra) + os.pathsep + os.environ.get("PATH", ""),
            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm", path=env["PATH"])
     git = shutil.which("git", path=env["PATH"])
     if not npm or not git:
         raise RuntimeError("Не найдены npm или git после установки зависимостей.")
+    for name in ("node", "npm", "git", "ffmpeg", "openssl", "mkcert"):
+        found = shutil.which("npm.cmd" if name == "npm" and os.name == "nt" else name, path=env["PATH"])
+        if found:
+            manifest[name] = found
+    manifest.setdefault("python", sys.executable)
+    write_json(target / "launcher" / "install-paths.json", manifest)
     command = "ci" if (target / "server" / "package-lock.json").is_file() else "install"
     run([npm, command, "--omit=dev"], log, cwd=str(target / "server"), env=env)
     client = target / "client"

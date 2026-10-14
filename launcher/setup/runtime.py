@@ -21,7 +21,10 @@ def directory():
 
 def binary_dirs():
     base = directory()
-    return [base, base / "bin", base / "node", base / "python", base / "python" / "Scripts",
+    saved = paths()
+    discovered = [Path(saved[name]).parent for name in ("node", "npm", "git", "ffmpeg", "openssl", "mkcert", "python")
+                  if saved.get(name) and Path(saved[name]).is_file()]
+    return discovered + [base, base / "bin", base / "node", base / "python", base / "python" / "Scripts",
             base / "git" / "cmd", base / "git" / "ucrt64" / "bin",
             base / "git" / "mingw64" / "bin", base / "ffmpeg" / "bin"]
 

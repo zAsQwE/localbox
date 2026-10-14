@@ -1,5 +1,5 @@
 ﻿# Windows 10/11: download settings, no wizard pages and no Python prerequisite.
-param([string]$Source = '')
+param([string]$Source = '', [switch]$Latest)
 $ErrorActionPreference = 'Stop'
 if (-not $Source) { $Source = Split-Path $PSScriptRoot -Parent }
 $Source = [IO.Path]::GetFullPath($Source)
@@ -16,7 +16,7 @@ public static class LocalBoxWindowTheme {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="LocalBox"
-        Width="680" Height="680" MinWidth="620" MinHeight="580" WindowStartupLocation="CenterScreen"
+        Width="680" Height="720" MinWidth="420" MinHeight="340" WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI" FontSize="14" Background="{DynamicResource Bg}" Foreground="{DynamicResource Fg}">
   <Window.Resources>
     <SolidColorBrush x:Key="Bg" Color="#F5F5F5"/>
@@ -130,9 +130,9 @@ public static class LocalBoxWindowTheme {
     <TextBlock Text="LocalBox" FontSize="28" FontWeight="SemiBold" Margin="0,0,0,16"/>
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <StackPanel x:Name="Settings">
-        <TextBlock Text="Куда скачать LocalBox" Margin="0,0,0,6"/>
+        <TextBlock Text="Куда скачать LocalBox" TextWrapping="Wrap" Margin="0,0,0,6"/>
         <DockPanel><Button x:Name="AppBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="AppPath"/></DockPanel>
-        <TextBlock Text="Папка зависимостей и TTS" Margin="0,12,0,6"/>
+        <TextBlock Text="Папка зависимостей и TTS" TextWrapping="Wrap" Margin="0,12,0,6"/>
         <DockPanel><Button x:Name="RuntimeBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="RuntimePath"/></DockPanel>
         <TextBlock Text="Озвучка" FontWeight="SemiBold" Margin="0,20,0,7"/>
         <ComboBox x:Name="Tts" SelectedIndex="0">
@@ -145,10 +145,10 @@ public static class LocalBoxWindowTheme {
         </WrapPanel>
         <TextBlock x:Name="TtsHint" Text="Скачаются только отмеченные голоса." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
         <CheckBox x:Name="Dodo" Content="Поддержка Додо Ре Ми" Margin="0,20,0,4"/>
-        <TextBlock Text="Папка Jackbox Party Pack 10 — необязательно" Margin="0,6,0,6"/>
+        <TextBlock Text="Папка Jackbox Party Pack 10 — необязательно" TextWrapping="Wrap" Margin="0,6,0,6"/>
         <DockPanel><Button x:Name="GameBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="GamePath" IsEnabled="False"/></DockPanel>
         <CheckBox x:Name="Cheat" Content="Указать папку с играми для читов" Margin="0,20,0,4"/>
-        <TextBlock Text="Папка со всеми Jackbox или отдельной игрой — необязательно" Margin="0,6,0,6"/>
+        <TextBlock Text="Папка со всеми Jackbox или отдельной игрой — необязательно" TextWrapping="Wrap" Margin="0,6,0,6"/>
         <DockPanel><Button x:Name="CheatBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="CheatPath" IsEnabled="False"/></DockPanel>
         <TextBlock Text="Файлы игр читаются на месте. Без выбранной папки — поиск в Steam." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,5,0,0"/>
         <CheckBox x:Name="Russian" Content="Скачать русский веб-клиент" Margin="0,16,0,4"/>
@@ -166,6 +166,30 @@ public static class LocalBoxWindowTheme {
 </Window>
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
+$area = [Windows.SystemParameters]::WorkArea
+$window.MinWidth = [Math]::Min(420, [Math]::Max(200, $area.Width - 24))
+$window.MinHeight = [Math]::Min(340, [Math]::Max(200, $area.Height - 24))
+$window.Width = [Math]::Min(680, [Math]::Max(200, $area.Width - 24))
+$window.Height = [Math]::Min(720, [Math]::Max(200, $area.Height - 24))
+
+function Fit-SetupScreen {
+    $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+    if ($handle -eq [IntPtr]::Zero) { return }
+    $screen = [Windows.Forms.Screen]::FromHandle($handle).WorkingArea
+    $presentation = [Windows.PresentationSource]::FromVisual($window)
+    if (-not $presentation.CompositionTarget) { return }
+    $transform = $presentation.CompositionTarget.TransformFromDevice
+    $available = $transform.Transform([Windows.Point]::new($screen.Width, $screen.Height))
+    $window.MinWidth = [Math]::Min(420, [Math]::Max(200, $available.X - 24))
+    $window.MinHeight = [Math]::Min(340, [Math]::Max(200, $available.Y - 24))
+    $window.MaxWidth = [Math]::Max($window.MinWidth, $available.X)
+    $window.MaxHeight = [Math]::Max($window.MinHeight, $available.Y)
+    if ($window.WindowState -eq 'Normal') {
+        $window.Width = [Math]::Min($window.Width, $window.MaxWidth - 24)
+        $window.Height = [Math]::Min($window.Height, $window.MaxHeight - 24)
+    }
+    $ui.Log.Height = [Math]::Min(120, [Math]::Max(48, $available.Y * 0.18))
+}
 $ui = @{}
 foreach ($name in @('Settings','AppPath','AppBrowse','RuntimePath','RuntimeBrowse','Tts','Voices','TtsHint','Dodo','GamePath','GameBrowse','Cheat','CheatPath','CheatBrowse','Russian','Details','Log','Progress','Download','Status')) { $ui[$name] = $window.FindName($name) }
 $script:running = $false
@@ -242,23 +266,6 @@ function Browse-Folder($Field) {
     finally { $dialog.Dispose() }
 }
 
-function Copy-Payload([string]$Destination) {
-    $manifestPath = Join-Path $Source 'installer\payload-sha256.json'
-    if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Не найден список файлов установки. Запустите собранный setup.exe.' }
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    foreach ($property in $manifest.PSObject.Properties) {
-        $relative = $property.Name.Replace('/', '\')
-        $file = Join-Path $Source $relative
-        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $property.Value) { throw "Не совпала контрольная сумма: $relative" }
-    }
-    foreach ($property in $manifest.PSObject.Properties) {
-        $relative = $property.Name.Replace('/', '\')
-        $to = Join-Path $Destination $relative
-        New-Item -ItemType Directory -Force -Path (Split-Path $to -Parent) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $Source $relative) -Destination $to -Force
-    }
-}
-
 function Start-Download {
     if ($script:running) { return }
     if ($script:installed) {
@@ -290,9 +297,9 @@ function Start-Download {
         $ui.Download.Content = 'Скачиваем…'
         $ui.Details.Visibility = 'Visible'
         $ui.Progress.Visibility = 'Visible'
-        Set-Status 'Скачиваем и настраиваем LocalBox…'
+        if ($Latest) { Set-Status 'Проверяем последний Release и скачиваем LocalBox…' }
+        else { Set-Status 'Скачиваем и настраиваем LocalBox…' }
         $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::Render)
-        Copy-Payload $target
         New-Item -ItemType Directory -Force -Path $work | Out-Null
         $options = Join-Path $work 'options.ini'
         $lines = @('[setup]', "runtime=$runtime", "tts=$tts", ('voices=' + ($voices -join ',')), "game=$game", "cheat_content=$cheat", ('dodo=' + [int][bool]$ui.Dodo.IsChecked), ('russian=' + [int][bool]$ui.Russian.IsChecked))
@@ -302,7 +309,8 @@ function Start-Download {
         $script:logText = ''
         $ui.Log.Clear()
         # Windows paths cannot contain a quote; quote every path independently for powershell.exe.
-        $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $target 'installer\windows-bootstrap.ps1') + '" -Root "' + $target + '" -OptionsFile "' + $options + '"'
+        $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Source 'installer\windows-install.ps1') + '" -Source "' + $Source + '" -Root "' + $target + '" -OptionsFile "' + $options + '"'
+        if ($Latest) { $arguments += ' -Latest' }
         $script:process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:stdout -RedirectStandardError $script:stderr
         $script:downloadTarget = $target
     } catch {
@@ -396,7 +404,8 @@ $progressTimer.Add_Tick({
     try { Read-Progress }
     catch { $ui.Log.AppendText("`r`n" + $_.Exception.Message); $ui.Details.IsExpanded = $true }
 })
-$window.Add_SourceInitialized({ $script:themeKey = ''; Update-Theme })
+$window.Add_SourceInitialized({ $script:themeKey = ''; Update-Theme; Fit-SetupScreen })
+$window.Add_LocationChanged({ Fit-SetupScreen })
 Load-GamePaths
 Update-Options
 Update-Theme

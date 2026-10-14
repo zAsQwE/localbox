@@ -61,3 +61,5 @@ server/render/
 *.log
 *.tmp
 /installer/setup-options.ini
+/.localbox-update.lock
+/.localbox-update-*/
