@@ -5,6 +5,8 @@ try { [Console]::InputEncoding = $OutputEncoding } catch { }
 try { [Console]::OutputEncoding = $OutputEncoding } catch { }
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
+Remove-Item Env:PYTHONLEGACYWINDOWSSTDIO -ErrorAction SilentlyContinue
+. (Join-Path $PSScriptRoot 'windows-process.ps1')
 $root = Split-Path $PSScriptRoot -Parent
 $manifest = Join-Path $root 'launcher\install-paths.json'
 $python = $null
@@ -32,5 +34,5 @@ if (-not $python) {
     }
 }
 if (-not $python) { Write-Host 'Python не найден. Запустите setup.exe или install.bat.'; exit 1 }
-& $python (Join-Path $root 'launcher\start.py') @args
-exit $LASTEXITCODE
+$worker = Start-LocalBoxProcess -File $python -Arguments (@((Join-Path $root 'launcher\start.py')) + @($args))
+exit (Complete-LocalBoxProcess $worker)

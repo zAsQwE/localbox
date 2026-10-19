@@ -70,6 +70,7 @@ if (Test-Path -LiteralPath $pathsFile) {
     foreach ($property in $saved.PSObject.Properties) { $previous[$property.Name] = $property.Value }
 }
 . (Join-Path $PSScriptRoot 'windows-discovery.ps1')
+. (Join-Path $PSScriptRoot 'windows-node.ps1')
 
 try {
     Start-Transcript -Path $logfile -Append | Out-Null
@@ -99,23 +100,7 @@ try {
         if (-not $python) { throw 'Python с tkinter не найден после установки.' }
     }
     Write-Host "Python: $python"
-    $nodeTools = Find-Node
-    if (-not $nodeTools) {
-        $checksums = Invoke-RestMethod 'https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt'
-        $match = [regex]::Match($checksums, '(?m)^([a-f0-9]{64})\s+(node-v[0-9.]+-win-x64.zip)\s*$')
-        if (-not $match.Success) { throw 'Не найден официальный Windows-архив Node.js.' }
-        $filename = $match.Groups[2].Value
-        $version = [regex]::Match($filename, 'node-(v[0-9.]+)-').Groups[1].Value
-        $archive = Join-Path $cache $filename
-        Download-File "https://nodejs.org/dist/$version/$filename" $archive $match.Groups[1].Value
-        $stage = Join-Path $cache 'node-extracted'
-        Expand-Archive -LiteralPath $archive -DestinationPath $stage -Force
-        $folder = Join-Path $stage $filename.Replace('.zip', '')
-        New-Item -ItemType Directory -Force -Path (Join-Path $runtime 'node') | Out-Null
-        Copy-Item -Path (Join-Path $folder '*') -Destination (Join-Path $runtime 'node') -Recurse -Force
-        $nodeTools = Find-Node
-        if (-not $nodeTools) { throw 'Node.js 18+ и npm не найдены после установки.' }
-    }
+    $nodeTools = Ensure-Node
     Write-Host "Использую Node.js: $($nodeTools.node)"
     $ffmpeg = Find-WorkingTool 'ffmpeg.exe' @($previous.ffmpeg, (Join-Path $runtime 'ffmpeg\bin\ffmpeg.exe')) @('-version')
     if (-not $ffmpeg) {
@@ -175,6 +160,7 @@ try {
     $manifest = Join-Path $Root 'launcher\install-paths.json'
     $previous.runtime = $runtime; $previous.python = $python
     $previous.node = $nodeTools.node; $previous.npm = $nodeTools.npm
+    $previous.npm_cli = $nodeTools.npm_cli
     $previous.git = $git; $previous.ffmpeg = $ffmpeg
     $previous.openssl = $openssl; $previous.mkcert = $mkcert
     $previous | ConvertTo-Json | Set-Content -LiteralPath $manifest -Encoding UTF8

@@ -145,6 +145,7 @@ function Get-LatestPayload([string]$Work) {
         Save-ReleaseArchive (Get-ReleaseAssetUrl $asset) $archive
         if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) { throw 'SHA-256 Release не совпала. Папка установки не изменена.' }
         Expand-VerifiedRelease $archive $payload $release.tag_name
+        $env:LOCALBOX_RELEASE_TAG = [string]$release.tag_name
         Write-Host "Устанавливаю Release $($release.tag_name)."
         return $payload
     } catch {

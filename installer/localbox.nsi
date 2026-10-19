@@ -1,6 +1,7 @@
 Unicode true
 !include "LogicLib.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
 
 !ifndef PAYLOAD_DIR
 !error "Передайте -DPAYLOAD_DIR=папка_файлов через tools/build-installers.py"
@@ -15,6 +16,8 @@ RequestExecutionLevel user
 SilentInstall silent
 WindowIcon off
 SetCompressor /SOLID lzma
+Var SetupArgs
+Var LatestSwitch
 
 ; NSIS only unpacks the bundle. The single-window UI works before Python is installed.
 Section "LocalBox"
@@ -26,6 +29,13 @@ Section "LocalBox"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR\payload"
   File /r "${PAYLOAD_DIR}/*"
-  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\payload\installer\windows-ui.ps1" -Source "$PLUGINSDIR\payload" -Latest' $0
+  StrCpy $LatestSwitch " -Latest"
+  ${GetParameters} $SetupArgs
+  ClearErrors
+  ${GetOptions} "$SetupArgs" "/local" $0
+  ${IfNot} ${Errors}
+    StrCpy $LatestSwitch ""
+  ${EndIf}
+  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\payload\installer\windows-ui.ps1" -Source "$PLUGINSDIR\payload"$LatestSwitch' $0
   SetErrorLevel $0
 SectionEnd

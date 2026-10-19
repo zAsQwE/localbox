@@ -10,10 +10,13 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+from client_ru import install_client as install_russian_client, release_info as russian_release_info
+from client_download import install_client as install_web_client
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "launcher"))
 from setup.dodo import songs_directory, import_dodo
+from setup.npm import invocation as npm_invocation
 PIPER_VOICES = ("ru_RU-denis-medium", "ru_RU-dmitri-medium", "ru_RU-irina-medium", "ru_RU-ruslan-medium")
 ROOT_FILES = ("LICENSE", "README.md", "start-server.sh", "start-server.bat", "setup.sh", "install.bat", "version.json")
 
@@ -66,7 +69,7 @@ def deploy(source, target, log=print):
         shutil.copy2(source / relative, destination)
     for obsolete in ("launcher/setup/porthole.py", "launcher/test_porthole.py", "docs/porthole.md"):
         (target / obsolete).unlink(missing_ok=True)
-    for name in ("start-server.sh", "setup.sh", "installer/linux-deps.sh"):
+    for name in ("start-server.sh", "setup.sh", "installer/linux-deps.sh", "installer/askpass.sh"):
         if (target / name).exists():
             (target / name).chmod(0o755)
     log(f"Файлы LocalBox: {target}")
@@ -167,6 +170,7 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
         cheat_content = str(Path(cheat_content).expanduser().resolve())
         if not Path(cheat_content).is_dir():
             raise ValueError("Папка с играми для читов не найдена.")
+    russian_release = russian_release_info() if russian else None
     deploy(source, target, log)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     manifest = read_json(target / "launcher" / "install-paths.json")
@@ -175,22 +179,20 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     if system_deps:
         if os.name == "nt":
             raise RuntimeError("Windows-зависимости устанавливает windows-bootstrap.ps1 до запуска Python.")
-        run(["bash", str(target / "installer" / "linux-deps.sh"), "--full", tts], log)
+        run(["bash", str(target / "installer" / "linux-deps.sh"), "--full", tts], log,
+            env={**os.environ, "LOCALBOX_SOURCE": str(target), "LOCALBOX_RUNTIME": str(runtime_dir)})
+        manifest = read_json(target / "launcher" / "install-paths.json")
     extra = [runtime_dir, runtime_dir / "bin", runtime_dir / "node", runtime_dir / "git" / "cmd",
              runtime_dir / "git" / "ucrt64" / "bin", runtime_dir / "git" / "mingw64" / "bin",
              runtime_dir / "ffmpeg" / "bin"]
     selected = [Path(manifest[name]).parent for name in ("node", "npm", "git", "ffmpeg", "openssl", "mkcert")
                 if manifest.get(name) and Path(manifest[name]).is_file()]
-    if os.name != "nt":
-        node = shutil.which("node")
-        if node:
-            selected.insert(0, Path(node).parent)
     extra = selected + extra
     env = {**os.environ, "PATH": os.pathsep.join(str(p) for p in extra) + os.pathsep + os.environ.get("PATH", ""),
            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm", path=env["PATH"])
     git = shutil.which("git", path=env["PATH"])
-    if not npm or not git:
+    if (not npm and not manifest.get('npm_cli')) or not git:
         raise RuntimeError("Не найдены npm или git после установки зависимостей.")
     for name in ("node", "npm", "git", "ffmpeg", "openssl", "mkcert"):
         found = shutil.which("npm.cmd" if name == "npm" and os.name == "nt" else name, path=env["PATH"])
@@ -199,21 +201,11 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     manifest.setdefault("python", sys.executable)
     write_json(target / "launcher" / "install-paths.json", manifest)
     command = "ci" if (target / "server" / "package-lock.json").is_file() else "install"
-    run([npm, command, "--omit=dev"], log, cwd=str(target / "server"), env=env)
-    client = target / "client"
-    if not (client / "main").is_dir():
-        if client.exists():
-            raise ValueError("Папка client неполная. Переместите её и повторите установку.")
-        with tempfile.TemporaryDirectory(prefix="localbox-client-", dir=target) as temp:
-            stage = Path(temp) / "client"
-            run([git, "clone", "--depth", "1", "https://github.com/DdejjCAT/jackbox.tv", str(stage)], log, env=env)
-            if not (stage / "main").is_dir():
-                raise RuntimeError("Скачанный клиент не содержит main/.")
-            stage.replace(client)
+    npm_command = npm_invocation(manifest.get('node'), npm, manifest.get('npm_cli'))
+    run([*npm_command, command, "--omit=dev"], log, cwd=str(target / "server"), env=env)
+    install_web_client(target, runtime_dir, source=source, log=log)
     if russian:
-        node = shutil.which("node", path=env["PATH"])
-        run([node, str(target / "tools" / "fetch-fun.js"), "--host", "jackbox.ru", "--dst", str(target / "client-ru")],
-            log, cwd=str(target), env=env)
+        install_russian_client(target, russian_release, log=log)
     if game:
         import_dodo(game, target, log)
     options = read_json(target / "launcher" / "localbox-settings.json")

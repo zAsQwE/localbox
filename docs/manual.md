@@ -60,7 +60,7 @@ Python 3.10+, Tk, Node.js, npm, ffmpeg, git и OpenSSL устанавливаю�
 ```sh
 ./setup.sh          # окно скачивания (в отсутствие дисплея — меню в терминале)
 ./setup.sh --console # текстовый мастер
-./setup.sh --ru     # + русский клиент (client-ru) с jackbox.ru
+./setup.sh --ru     # + русский клиент client-ru.zip из Release
 ./setup.sh --run    # установить и сразу запустить
 ```
 

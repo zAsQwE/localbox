@@ -355,6 +355,8 @@ def run_wizard(target=None, runtime=None, game=None, dodo=False, russian=False, 
                 log_view.insert("end", value + "\n")
                 log_view.see("end")
                 log_view.configure(state="disabled")
+                if running[0] and value.startswith(("Веб-клиент:", "Распаковываю веб-клиент", "Использую готовый веб-клиент")):
+                    set_status(value)
             else:
                 running[0] = False
                 progressbar.stop()

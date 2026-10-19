@@ -19,6 +19,7 @@ if [ "$use_release" = 1 ] && [ "${LOCALBOX_RELEASE_READY:-0}" != 1 ]; then
     trap 'rm -rf "$localbox_release_work"' EXIT HUP INT TERM
     python3 "$LOCALBOX_SOURCE/installer/release.py" --destination "$localbox_release_work"
     export LOCALBOX_BUNDLE_SOURCE="$localbox_release_work/payload"
+    export LOCALBOX_RELEASE_TAG="$(cat "$localbox_release_work/release-tag.txt")"
     export LOCALBOX_RELEASE_READY=1
     bash "$LOCALBOX_BUNDLE_SOURCE/setup.sh" "$@"
     exit $?

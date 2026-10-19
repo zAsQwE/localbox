@@ -245,8 +245,18 @@ def prepare_dependencies(source, target, log):
     if not npm:
         raise RuntimeError("Не найден npm. Запустите setup для проверки зависимостей.")
     log("Подготавливаю зависимости новой версии…")
-    command = [npm, "ci" if (server / "package-lock.json").is_file() else "install", "--omit=dev"]
-    with subprocess.Popen(command, cwd=server, shell=os.name == "nt", stdout=subprocess.PIPE,
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'launcher'))
+    from setup.npm import invocation
+    saved = {}
+    try:
+        data = json.loads((target / 'launcher/install-paths.json').read_text(encoding='utf-8-sig'))
+        if isinstance(data, dict):
+            saved = data
+    except (OSError, ValueError):
+        pass
+    command = [*invocation(saved.get('node') or shutil.which('node'), npm, saved.get('npm_cli')),
+               "ci" if (server / "package-lock.json").is_file() else "install", "--omit=dev"]
+    with subprocess.Popen(command, cwd=server, shell=False, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace") as process:
         for line in process.stdout:
             log(line.rstrip())

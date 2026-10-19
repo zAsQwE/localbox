@@ -93,6 +93,7 @@ def deps_installed() -> bool:
 
 
 def install_deps(log=print) -> bool:
+    from .npm import invocation
     node = find_node()
     npm_name = "npm.cmd" if plat.is_windows() else "npm"
     npm = shutil.which(npm_name) or (str(Path(node).parent / npm_name) if node else None)
@@ -104,8 +105,9 @@ def install_deps(log=print) -> bool:
     if node:
         env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
     try:
-        p = subprocess.run([npm, "install"], env=env, cwd=str(engine_dir()), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           shell=plat.is_windows())
+        command = invocation(node, npm, runtime.paths().get('npm_cli'), windows=plat.is_windows())
+        p = subprocess.run([*command, "install"], env=env, cwd=str(engine_dir()), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           shell=False)
         if p.returncode != 0:
             log(p.stdout[-500:]); log(p.stderr[-500:])
             return False

@@ -3,6 +3,7 @@ param([string]$Source = '', [switch]$Latest)
 $ErrorActionPreference = 'Stop'
 if (-not $Source) { $Source = Split-Path $PSScriptRoot -Parent }
 $Source = [IO.Path]::GetFullPath($Source)
+. (Join-Path $PSScriptRoot 'windows-process.ps1')
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 Add-Type @'
 using System;
@@ -309,9 +310,9 @@ function Start-Download {
         $script:logText = ''
         $ui.Log.Clear()
         # Windows paths cannot contain a quote; quote every path independently for powershell.exe.
-        $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Source 'installer\windows-install.ps1') + '" -Source "' + $Source + '" -Root "' + $target + '" -OptionsFile "' + $options + '"'
-        if ($Latest) { $arguments += ' -Latest' }
-        $script:process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:stdout -RedirectStandardError $script:stderr
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Source 'installer\windows-install.ps1'), '-Source', $Source, '-Root', $target, '-OptionsFile', $options)
+        if ($Latest) { $arguments += '-Latest' }
+        $script:process = Start-LocalBoxProcess -File (Join-Path $PSHOME 'powershell.exe') -Arguments $arguments -Stdout $script:stdout -Stderr $script:stderr
         $script:downloadTarget = $target
     } catch {
         $script:running = $false
@@ -325,6 +326,15 @@ function Start-Download {
 
 function Read-Progress {
     if (-not $script:process) { return }
+    $script:process.Process.Refresh()
+    $finished = $script:process.Process.HasExited
+    $code = $null
+    $completionError = ''
+    if ($finished) {
+        try { $code = Complete-LocalBoxProcess $script:process }
+        catch { $completionError = "`r`nНе удалось прочитать результат установки: " + $_.Exception.Message; $code = -1 }
+        $script:process = $null
+    }
     $text = ''
     foreach ($file in @($script:stdout, $script:stderr)) {
         if (Test-Path -LiteralPath $file) {
@@ -336,17 +346,13 @@ function Read-Progress {
             } catch [IO.IOException] { }
         }
     }
+    $text += $completionError
     if ($text -ne $script:logText) {
         $script:logText = $text
         $ui.Log.Text = $text
         $ui.Log.ScrollToEnd()
     }
-    $script:process.Refresh()
-    if (-not $script:process.HasExited) { return }
-    $script:process.WaitForExit()
-    $code = $script:process.ExitCode
-    $script:process.Dispose()
-    $script:process = $null
+    if (-not $finished) { return }
     $script:running = $false
     $ui.Progress.Visibility = 'Collapsed'
     $ui.Download.IsEnabled = $true
@@ -368,7 +374,7 @@ function Read-Progress {
     } else {
         $ui.Settings.IsEnabled = $true
         $ui.Download.Content = 'Скачать'
-        Set-Status 'Не получилось скачать. Подробности — в журнале.' 'Error'
+        Set-Status ("Установка не завершена (код $code). Подробности — в журнале.") 'Error'
         $ui.Details.IsExpanded = $true
     }
 }

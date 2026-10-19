@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from setup import settings, runtime, tts_catalog
+from setup import settings, runtime, tts_catalog, console
 
 
 def choose(title, options, default=0, read=input, write=print):
@@ -42,6 +42,7 @@ def menu(cfg, read=input, write=print):
 
 def main(argv=None):
     runtime.activate()
+    console.configure()
     args = list(sys.argv[1:] if argv is None else argv)
     interactive = "--interactive" in args or (not args and sys.stdin.isatty())
     args = [arg for arg in args if arg != "--interactive"]

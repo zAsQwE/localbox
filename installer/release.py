@@ -32,6 +32,7 @@ def fetch_latest(destination, log=print):
                 file.write_bytes(package.read(name))
                 if file.suffix == ".sh":
                     file.chmod(0o755)
+        (destination / "release-tag.txt").write_text(release["tag_name"], encoding="utf-8")
         log(f"Устанавливаю Release {release['tag_name']}.")
         return payload
     except Exception:

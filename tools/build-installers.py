@@ -50,7 +50,21 @@ __LOCALBOX_PAYLOAD__
     output.chmod(0o755)
 
 
-def build(output_dir=None, windows=True, linux=True, makensis=None, version=None):
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build(output_dir=None, windows=True, linux=True, makensis=None, version=None, client_ru_archive=None):
+    if client_ru_archive:
+        client_ru_archive = Path(client_ru_archive).expanduser().resolve()
+        if not client_ru_archive.is_file():
+            raise ValueError("Не найден архив русского клиента: " + str(client_ru_archive))
+        from client_ru import client_entries
+        client_entries(client_ru_archive)
     output_dir = Path(output_dir or ROOT / "dist").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     compiler = makensis or os.environ.get("MAKENSIS") or shutil.which("makensis")
@@ -82,7 +96,12 @@ def build(output_dir=None, windows=True, linux=True, makensis=None, version=None
                     archive.write(path, str(path.relative_to(stage)))
     artifacts = [output_dir / name for enabled, name in ((windows, "setup.exe"), (linux, "setup-linux.run")) if enabled]
     artifacts.append(output_dir / "localbox-update.zip")
-    (output_dir / "SHA256SUMS").write_text("".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in artifacts), encoding="utf-8")
+    if client_ru_archive:
+        destination = output_dir / "client-ru.zip"
+        if client_ru_archive != destination.resolve():
+            shutil.copy2(client_ru_archive, destination)
+        artifacts.append(destination)
+    (output_dir / "SHA256SUMS").write_text("".join(file_sha256(path) + "  " + path.name + "\n" for path in artifacts), encoding="utf-8")
     for path in artifacts:
         print(f"Готово: {path} ({path.stat().st_size:,} байт)")
     return artifacts
@@ -93,13 +112,14 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir")
     parser.add_argument("--makensis")
     parser.add_argument("--version", help="Версия будущего Release, например v1.2.0; по умолчанию version.json")
+    parser.add_argument("--client-ru-archive", help="Готовый ZIP русского клиента: скопировать в dist/client-ru.zip и добавить SHA-256")
     parser.add_argument("--linux-only", action="store_true")
     parser.add_argument("--windows-only", action="store_true")
     args = parser.parse_args()
     if args.linux_only and args.windows_only:
         parser.error("Выберите один фильтр платформы.")
     try:
-        build(args.output_dir, not args.linux_only, not args.windows_only, args.makensis, args.version)
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+        build(args.output_dir, not args.linux_only, not args.windows_only, args.makensis, args.version, args.client_ru_archive)
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)
