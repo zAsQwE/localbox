@@ -1,3 +1,5 @@
+# WARNING: This repository was created by Claude and Codex, and may not be very secure, so it's best to use it only in offline mode (or, at most, for playing with friends). ВНИМАНИЕ: Данный репозиторий написан Claude и Codex, и его безопасность может быть очень маленькой, так что, лучше всего используйте именно в офлайн режиме (или же максимум для игры с друзьями)
+
 # LocalBox
 
 Локальный сервер для игр Jackbox с веб-клиентом, озвучкой и поддержкой Додо Ре Ми.
