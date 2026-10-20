@@ -197,7 +197,11 @@ function dispatch(client, msg) {
             room.sendByAcl(e.acl, { opcode: "lock", result: { key: p.key, from: room.host ? room.host.profileId : null } });
             break;
         }
-        case "game/started": case "game/metric": case "game/ended": case "text/filter":
+        case "game/started":
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
+            room.gameStarted = true;
+            break;
+        case "game/metric": case "game/ended": case "text/filter":
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             break;
         case "external-request/create":

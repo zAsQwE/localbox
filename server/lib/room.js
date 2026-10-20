@@ -38,6 +38,7 @@ class Room {
         this.closed = false;
         this.token = u.makeToken();
         this.locked = false;
+        this.gameStarted = false;
         this.audienceEnabled = !!params.audienceEnabled;
         this.password = params.password || null;
         this.moderatorPassword = params.moderatorPassword || null;

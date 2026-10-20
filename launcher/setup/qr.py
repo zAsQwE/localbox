@@ -25,7 +25,7 @@ class QRClient:
 
     def fetch(self):
         room = self.status()
-        if not room:
+        if not room or room.get("qrVisible") is False:
             self.key = self.image = None
             return None, None
         key = (room["code"], room["joinUrl"])

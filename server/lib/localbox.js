@@ -23,6 +23,7 @@ function roomStatus(room, serverUrl) {
         maxPlayers: room.maxPlayers,
         minPlayers: room.minPlayers,
         full: players.length >= room.maxPlayers,
+        qrVisible: !room.locked && !room.gameStarted,
         joinUrl: `https://${serverUrl}/?code=${encodeURIComponent(code)}&ref=qr`,
     };
 }
@@ -57,7 +58,7 @@ function findStartAction(room) {
 function findVip(room) { return findStartAction(room)?.player || null; }
 
 function tryAutoStart(room, log = console.log) {
-    if (!AUTO_START_FULL || !room || room.closed || room._localboxAutoStarted) return false;
+    if (!AUTO_START_FULL || !room || room.closed || room.locked || room.gameStarted || room._localboxAutoStarted) return false;
     const players = connectedPlayers(room);
     if (!room.host || room.host.profileId == null || players.length < room.maxPlayers) return false;
     const start = findStartAction(room);
