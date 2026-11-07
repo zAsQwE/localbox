@@ -13,7 +13,7 @@ Synthesized instrument timbres are approximate; rendering remains experimental.
 Enable Dodo Re Mi in setup, the startup menu or launcher Settings. Install ffmpeg into PATH or the runtime folder:
 `runtime/ffmpeg.exe` on Windows, `runtime/ffmpeg` on Linux/macOS. Setup can install it automatically.
 For manual Linux installation use `sudo apt install ffmpeg` or `sudo pacman -S ffmpeg`.
-On Windows use an [ffmpeg build](https://www.gyan.dev/ffmpeg/builds/) and, if needed, the
+On Windows use an [ffmpeg build](https://github.com/GyanD/codexffmpeg/releases/latest) (`ffmpeg-…-essentials_build.zip`) and, if needed, the
 [Visual C++ x64 runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
 Choose your installed Jackbox 10 folder during setup, or use **Settings → Dodo Re Mi → Import music**.

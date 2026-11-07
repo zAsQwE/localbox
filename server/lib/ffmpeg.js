@@ -6,7 +6,7 @@
 // node — см. launcher/setup/engine.py find_node()), и только потом — PATH.
 //
 // Кладётся руками: скачай ffmpeg (https://ffmpeg.org/download.html, для Windows — сборка с
-// gyan.dev/ffmpeg/builds), возьми ffmpeg.exe (Windows) / ffmpeg (Linux/macOS) из bin/ архива и
+// github.com/GyanD/codexffmpeg/releases), возьми ffmpeg.exe (Windows) / ffmpeg (Linux/macOS) из bin/ архива и
 // положи в runtime/ffmpeg.exe (или runtime/ffmpeg) в корне проекта.
 //
 

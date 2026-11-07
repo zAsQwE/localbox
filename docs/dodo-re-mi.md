@@ -22,7 +22,7 @@ LocalBox собирает этот mp3 **локально** через `ffmpeg`:
   проверяет туда, и только потом PATH. Полезно, если системная установка (напр. через winget)
   не подхватывается по PATH — так надёжнее. Без ffmpeg рендер не работает.
   - Arch/CachyOS: `sudo pacman -S ffmpeg` · Debian/Ubuntu: `sudo apt install ffmpeg`
-  - Windows: скачай сборку с https://www.gyan.dev/ffmpeg/builds/ (ffmpeg-release-essentials),
+  - Windows: скачай сборку с https://github.com/GyanD/codexffmpeg/releases/latest (`ffmpeg-…-essentials_build.zip`),
     из архива `bin/ffmpeg.exe` положи в `runtime/ffmpeg.exe`.
 - Node.js (как для всего движка).
 - Интернет **один раз** — недостающие сэмплы инструментов докачиваются с

@@ -119,11 +119,16 @@ try {
     Write-Host (T 'Использую Node.js: {0}' -Values @(($($nodeTools.node))))
     $ffmpeg = Find-WorkingTool 'ffmpeg.exe' @($previous.ffmpeg, (Join-Path $runtime 'ffmpeg\bin\ffmpeg.exe')) @('-version')
     if (-not $ffmpeg) {
-        $hashText = Invoke-RestMethod 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256'
-        $hash = [regex]::Match($hashText, '[a-fA-F0-9]{64}').Value
-        if (-not $hash) { throw (T 'Не найдена SHA-256 ffmpeg.') }
-        $archive = Join-Path $cache 'ffmpeg.zip'
-        Download-File 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' $archive $hash
+        # Сборки Gyan с GitHub (официальное зеркало gyan.dev): SHA-256 из digest файла Release.
+        $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/GyanD/codexffmpeg/releases/latest' -Headers @{'User-Agent' = 'LocalBox-Setup'}
+        $asset = $release.assets | Where-Object { $_.name -match '^ffmpeg-[0-9.]+-essentials_build\.zip$' } | Select-Object -First 1
+        if (-not $asset -or $asset.digest -notmatch '^sha256:([a-fA-F0-9]{64})$' -or
+            -not ([string]$asset.browser_download_url).StartsWith('https://github.com/GyanD/codexffmpeg/releases/download/', [StringComparison]::Ordinal)) {
+            throw (T 'Не найдена SHA-256 ffmpeg.')
+        }
+        $hash = $matches[1]
+        $archive = Join-Path $cache $asset.name
+        Download-File $asset.browser_download_url $archive $hash
         $stage = Join-Path $cache 'ffmpeg-extracted'
         Expand-Archive -LiteralPath $archive -DestinationPath $stage -Force
         $exe = Get-ChildItem -LiteralPath $stage -Filter ffmpeg.exe -Recurse | Select-Object -First 1
