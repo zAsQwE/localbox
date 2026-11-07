@@ -5,7 +5,7 @@
 Локальный сервер для игр Jackbox (паки 1–12, Naughty Pack, Trivia Murder Party 3).
 Игры, телефоны игроков, озвучка и Додо Ре Ми работают в вашей сети без интернета.
 
-[Скачать](https://github.com/zAsQwE/localbox/releases) · [Telegram](https://t.me/lacalbox)
+[Скачать](https://github.com/zAsQwE/localbox/releases) · [Telegram](https://t.me/lacalbox) · [Видео-туториал](https://youtu.be/FlBtIWncPLc?si=xLj6I7CLvtbp_o0J)
 
 ## Установка
 
