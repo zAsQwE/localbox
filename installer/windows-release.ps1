@@ -14,8 +14,8 @@ function Test-PayloadPath([string]$Name) {
             $part -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') { return $false }
     }
     if ($parts[-1] -in @('config.json','localbox-settings.json','install-paths.json','update-state.json','setup-options.ini','testing.md','testing.en.md')) { return $false }
-    if (@('LICENSE','README.md','start-server.sh','start-server.bat','setup.sh','install.bat','version.json') -ccontains $Name) { return $true }
-    return $parts[0] -cin @('launcher','server','installer','tools','docs') -and [IO.Path]::GetExtension($Name) -cin @('.py','.js','.json','.md','.txt','.ps1','.sh','.nsi')
+    if (@('LICENSE','README.md','start-server.sh','start-server.bat','setup.sh','install.bat','version.json','launcher/setup/pki/windows-root-x64.exe') -ccontains $Name) { return $true }
+    return $parts[0] -cin @('launcher','server','installer','tools','docs') -and [IO.Path]::GetExtension($Name) -cin @('.py','.js','.json','.md','.txt','.ps1','.sh','.nsi','.c')
 }
 
 function Get-ReleaseVersion([string]$Version) {

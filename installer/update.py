@@ -34,6 +34,7 @@ ROOT_FILES = {"LICENSE", "README.md", "start-server.sh", "start-server.bat", "se
 EXCLUDED = {".git", "node_modules", "runtime", "client", "client-ru", "certs", "storage", "cache", "render",
             "test", "tests", "__pycache__", "build", "dist", "piper"}
 PRIVATE_FILES = {"config.json", "localbox-settings.json", "install-paths.json", "update-state.json", "setup-options.ini", "testing.md", "testing.en.md"}
+TRUST_HELPER = "launcher/setup/pki/windows-root-x64.exe"  # собранный помощник, его SHA-256 в windows-root.json
 OBSOLETE_FILES = (
     "launcher/setup/pack12.py", "tools/connect-pack12.py", "tools/connect-pack12.ps1",
     "tools/patch-pack12-tls.py", "tools/patch-pack12-tls.ps1",
@@ -179,8 +180,8 @@ def allowed_path(name):
         return False
     if path.name in PRIVATE_FILES:
         return False
-    return name in ROOT_FILES or (path.parts[0] in ("launcher", "server", "installer", "tools", "docs")
-                                  and path.suffix in (".py", ".js", ".json", ".md", ".txt", ".ps1", ".sh", ".nsi"))
+    return name in ROOT_FILES or name == TRUST_HELPER or (path.parts[0] in ("launcher", "server", "installer", "tools", "docs")
+                                  and path.suffix in (".py", ".js", ".json", ".md", ".txt", ".ps1", ".sh", ".nsi", ".c"))
 
 
 def validate_archive(archive_path, expected_version=None):
