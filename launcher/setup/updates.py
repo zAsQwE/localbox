@@ -12,29 +12,30 @@ import tempfile
 from . import platform as plat
 
 
-def updater():
-    path = plat.repo_root() / "installer/update.py"
-    spec = importlib.util.spec_from_file_location("localbox_release_updater", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def russian_client():
-    """Import installed setup helpers without changing the launcher's search path."""
+def _installer(module):
+    """Import an installed setup helper as part of one private package, so its relative imports
+    (translations included) resolve without changing the launcher's search path."""
     name = "_localbox_installer"
     if name not in sys.modules:
         directory = plat.repo_root() / "installer"
         spec = importlib.util.spec_from_file_location(name, directory / "__init__.py",
                                                      submodule_search_locations=[str(directory)])
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
+        package = importlib.util.module_from_spec(spec)
+        sys.modules[name] = package
         try:
-            spec.loader.exec_module(module)
+            spec.loader.exec_module(package)
         except Exception:
             sys.modules.pop(name, None)
             raise
-    return importlib.import_module(name + ".client_ru")
+    return importlib.import_module(f"{name}.{module}")
+
+
+def updater():
+    return _installer("update")
+
+
+def russian_client():
+    return _installer("client_ru")
 
 
 def launch(archive, version, work):
