@@ -36,8 +36,9 @@ def launch_options(host):
 def steam_launch_options(host):
     """The one Steam line the launcher shows.
 
-    Windows: only serverUrl. Linux: one line for every build (see linux_launch_options), or the
-    bare option until the server has written the game CA file once.
+    Windows: only serverUrl. Linux: one line for every build (see linux_launch_options), shown
+    from the first launcher start: the game CA file path never changes, so a line copied before
+    the server first runs keeps working once the server writes that file.
     """
     cafile = game_cafile()
     return linux_launch_options(host, cafile) if cafile else launch_options(host)
@@ -68,9 +69,20 @@ def linux_launch_options(host, cafile):
 
 
 def game_cafile():
-    """The public CA bundle for the Linux Steam line, or None (other systems, not created yet)."""
+    """The public CA bundle path for the Linux Steam line, or None on other systems.
+
+    The path is returned even before the file exists (prepare_game_cafile and every server start
+    write it), so the launcher never shows a shorter line that the user would copy into Steam.
+    """
     from . import certs, platform as plat
     if not plat.is_linux():
         return None
-    path = certs.game_bundle_path()
-    return path if path.is_file() else None
+    return certs.game_bundle_path()
+
+
+def prepare_game_cafile():
+    """Write the Linux game CA file at launcher start when the LocalBox CA already exists."""
+    from . import certs, platform as plat
+    if not plat.is_linux() or not certs.localbox_ca_files(plat.certs_dir())[0].is_file():
+        return None
+    return certs.prepare_game_ca_bundle(log=lambda *_: None)

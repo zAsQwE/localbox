@@ -278,6 +278,8 @@ def run_gui():
             command_var.set(tr('Укажи корректный адрес сервера в настройках'))
     url_var.trace_add("write", refresh_address)
     refresh_address()
+    # The Linux line names the game CA file; write it now so the game connects without a server restart.
+    threading.Thread(target=game_tls.prepare_game_cafile, daemon=True).start()
     address_label = tk.Label(connection, textvariable=player_url_var, bg=CARD, fg=FG,
                             font=(MONO, 13, "bold"), anchor="w", justify="left")
     address_label.grid(row=1, column=0, sticky="ew", pady=(5, 0))
