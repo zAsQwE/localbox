@@ -1,6 +1,6 @@
 "use strict";
 //
-// LocalBox server — точка входа. Свой сервер, совместимый с играми Jackbox по протоколам
+// LocalBox — точка входа. Свой сервер, совместимый с играми Jackbox по протоколам
 // Ecast (API v2, современные игры) и Blobcast (socket.io, старые игры). Порты 80/443/38202/38203.
 //
 
@@ -18,13 +18,17 @@ const handleBlobcast = require("./lib/blobcast-ws.js");
 const blobcastRouter = require("./lib/blobcast.js");
 const state = require("./lib/state.js");
 const tts = require("./lib/tts.js");
+const ttsPrewarm = require("./lib/tts-prewarm.js");
 const render = require("./lib/render.js");
 const admin = require("./lib/admin.js");
 const localbox = require("./lib/localbox.js");
 const network = require("./lib/network.js");
+const availability = require("./lib/game-availability.js");
 const QRCode = require("qrcode");
 
 let config;
+let activeTlsOptions;
+const tlsReload = require("./lib/tls-reload.js");
 try { config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8")); }
 catch (e) { console.error("Не удалось прочитать server/config.json: " + e.message + ". Запустите лаунчер для настройки сервера."); process.exit(1); }
 if (!config || !config.ssl || !config.ssl.cert || !config.ssl.key) {
@@ -44,6 +48,8 @@ try {
     for (const k of ["appTags", "appIds", "maxPlayers", "minPlayers"]) Object.assign(state.games[k], gj[k] || {});
 } catch { /* нет таблицы — неизвестные игры регистрируются на лету */ }
 if (config.games) for (const k of ["appTags", "appIds", "maxPlayers", "minPlayers"]) Object.assign(state.games[k], config.games[k] || {});
+availability.registerGames(state.games);
+if (!availability.enabled()) console.log("[games] Jackbox 12 выключен (LOCALBOX_ENABLE_PACK12=0).");
 const serverUrl = state.serverUrl;
 // Кастомный код комнаты (вместо случайного) — задаётся в лаунчере. Пусто = случайный код.
 const ROOM_CODE = (process.env.LOCALBOX_ROOM_CODE || "").trim();
@@ -62,28 +68,54 @@ app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin) res.header("Access-Control-Allow-Origin", origin);
     res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "content-type,x-jbg-secret,x-internal-token");
+    res.header("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "content-type,if-none-match,x-jbg-secret,x-internal-token");
     if (req.method === "OPTIONS") return res.status(200).end();
     next();
 });
 
+require("./lib/images.js").mount(app);
+require("./lib/image-cdn.js").mount(app);
+require("./lib/client-updates.js").mount(app);
+
 // POST /api/v2/rooms — создать комнату.
+function disabledGame(req, res, tag, id) {
+    console.warn("[games] HTTP 422 game_disabled: " + JSON.stringify({ appTag: tag, appId: id }) +
+        " — Jackbox 12 выключен переменной LOCALBOX_ENABLE_PACK12=0.");
+    return res.status(422).send({ ok: false, error: availability.message, errorCode: "game_disabled" });
+}
 app.post("/api/v2/rooms", (req, res) => {
     const p = req.body || {};
+    if (availability.isDisabled(p.appTag, p.appId))
+        return disabledGame(req, res, p.appTag, p.appId);
     if (!p.userId) return res.status(400).send({ ok: false, error: "missing required field userId" });
+    // The Unreal Ecast client can identify its game by appId alone.
+    if (!p.appTag && typeof p.appId === "string") p.appTag = state.games.appIds[p.appId];
     if (!p.appTag) return res.status(400).send({ ok: false, error: "missing required field appTag" });
-    state.register(p);
+    if (!state.register(p))
+        return disabledGame(req, res, p.appTag, p.appId);
     if (ROOM_CODE) p.forceRoomId = ROOM_CODE;   // фиксированный код комнаты из настроек
     const room = new mgr.Room(p, serverUrl, state.games);
+    // A game started with -jbg.config protocol=http (Jackbox 12 under Proton) must also
+    // download our files over HTTP; its TLS stack would reject the LocalBox certificate.
+    room.hostScheme = req.socket.encrypted ? "https" : "http";
     mgr.add(room);
     console.log("[room] created", room.code, "for", room.appTag, "(" + room.appId + ")");
+    if (availability.isPack12(room.appTag, room.appId)) {
+        const pending = setTimeout(() => {
+            if (mgr.get(room.code) === room && !room.closed && !room.host?.connected)
+                console.warn("[room] " + room.code + ": комната создана, но игра ещё не подключилась по WebSocket. Проверьте адрес serverUrl, доступ к TCP 443 и доверие CA LocalBox на компьютере с игрой (кнопка «Обновить сертификат»; для Proton — в его окружении).");
+        }, 8000);
+        pending.unref();
+    }
     res.send({ ok: true, body: { host: serverUrl, code: room.code, token: room.token } });
 });
 
 // GET /api/v2/app-configs/:appTag — настройки игры (если заданы; иначе клиент берёт свои дефолты).
 app.get("/api/v2/app-configs/:appTag", (req, res) => {
     const tag = req.params.appTag;
+    if (availability.isDisabled(tag))
+        return disabledGame(req, res, tag);
     const settings = config.appConfigs && config.appConfigs[tag];
     if (!settings) return res.status(404).send({ ok: false, error: "no app config for " + tag });
     res.send({ ok: true, body: { appId: state.games.appTags[tag] || tag, appTag: tag, settings } });
@@ -117,7 +149,7 @@ app.post("/tts/generate", async (req, res) => {
     const b = req.body || {};
     if (!b.text) return res.status(400).send({ success: false, error: "missing required parameter: text" });
     try {
-        const name = await tts.generate(b.text, b.voice, b.rate);
+        const name = await tts.generate(b.text, b.voice, b.rate, ttsPrewarm.ownerForRequest(req, mgr.list()));
         res.send({ success: true, url: network.origin(req, serverUrl) + "/tts/" + name });
     } catch (e) {
         res.status(500).send({ success: false, error: String(e && e.message || e) });
@@ -138,24 +170,20 @@ app.get("/render/:file", (req, res) => {
     fs.createReadStream(f).on("error", () => res.sendStatus(404)).pipe(res);
 });
 
-// Read-only certificate information. LocalBox does not install this CA into trust stores.
-function publicCaPath() {
-    return path.join(__dirname, "..", "certs", "localbox-rootCA.pem");
-}
+// Read-only certificate information; trust installation requires explicit launcher consent.
 function sendPublicCa(req, res) {
-    const f = publicCaPath();
-    if (!fs.existsSync(f)) return res.sendStatus(404);
+    const ca = activeTlsOptions && tlsReload.publicCa(activeTlsOptions);
+    if (!ca) return res.sendStatus(404);
     const filename = req.path.endsWith(".crt") ? "localbox-ca.crt" : "localbox-ca.pem";
     res.type("application/x-x509-ca-cert").set("Content-Disposition", `attachment; filename="${filename}"`);
-    fs.createReadStream(f).on("error", () => res.sendStatus(404)).pipe(res);
+    res.set("Cache-Control", "no-store").send(ca);
 }
 app.get(["/localbox-ca.pem", "/localbox-ca.crt"], sendPublicCa);
 app.get("/localbox-ca", (_req, res) => {
-    const f = publicCaPath();
-    if (!fs.existsSync(f)) return res.sendStatus(404);
-    let fingerprint = "";
-    try { fingerprint = new crypto.X509Certificate(fs.readFileSync(f)).fingerprint256; } catch { /* invalid CA */ }
-    res.type("html").send(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CA LocalBox</title><style>body{font:18px system-ui;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.5}a{display:inline-block;padding:12px 18px;background:#6757e8;color:white;border-radius:8px;text-decoration:none}code{word-break:break-all}</style><h1>Сертификат LocalBox</h1><p>Публичный сертификат хранится в папке LocalBox. Приложение не добавляет его в доверие системы, браузера или Steam.</p><p><a href="/localbox-ca.crt">Скачать localbox-ca.crt</a></p><p>SHA-256: <code>${fingerprint || "недоступен"}</code></p><p>Закрытого ключа в этом файле нет.</p></html>`);
+    const ca = activeTlsOptions && tlsReload.publicCa(activeTlsOptions);
+    if (!ca) return res.sendStatus(404);
+    const fingerprint = new crypto.X509Certificate(ca).fingerprint256;
+    res.type("html").send(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CA LocalBox</title><style>body{font:18px system-ui;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.5}a{display:inline-block;padding:12px 18px;background:#6757e8;color:white;border-radius:8px;text-decoration:none}code{word-break:break-all}</style><h1>Сертификат LocalBox</h1><p>Это публичный корневой CA сервера. Скачивание файла не устанавливает доверие. В лаунчере кнопка «Обновить сертификат» добавляет CA в доверенные на компьютере с лаунчером только после предупреждения и подтверждения.</p><p><a href="/localbox-ca.crt">Скачать localbox-ca.crt</a></p><p>SHA-256: <code>${fingerprint || "недоступен"}</code></p><p>Закрытого ключа в этом файле нет.</p></html>`);
 });
 
 // Состояние активной комнаты для QR-оверлея лаунчера.
@@ -235,13 +263,33 @@ function onUpgrade(request, socket, head) {
 
 let servers = [];
 try {
-    const ssl = { cert: fs.readFileSync(path.resolve(__dirname, config.ssl.cert)), key: fs.readFileSync(path.resolve(__dirname, config.ssl.key)) };
+    const files = { cert: path.resolve(__dirname, config.ssl.cert), key: path.resolve(__dirname, config.ssl.key) };
+    // After a long VPS outage the certificate may have expired. HTTP must still
+    // start so Certbot's webroot challenge can renew it. New pairs are checked
+    // for validity before hot reload; clients keep enforcing TLS validity too.
+    const initial = tlsReload.read(files, { allowExpired: true });
+    const ssl = initial.options;
+    activeTlsOptions = ssl;
+    const publicRoot = tlsReload.publicCa(ssl);
+    if (publicRoot) console.log("[tls] CA работающего сервера SHA-256: " + new crypto.X509Certificate(publicRoot).fingerprint256);
     servers = [
         { s: http.createServer(app), port: 80 },
         { s: https.createServer(ssl, app), port: 443 },
         { s: http.createServer(app), port: 38202 },
         { s: https.createServer(ssl, app), port: 38203 },
     ];
+    // Porthole: an extra plain-HTTP web port for friends whose port 80 is taken (e.g. 9999).
+    // Players get links back to whatever host:port they used, so nothing else changes.
+    const portholePort = Number(process.env.LOCALBOX_PORTHOLE_PORT || 0);
+    if (Number.isInteger(portholePort) && portholePort >= 1024 && portholePort <= 65535 &&
+        !servers.some(({ port }) => port === portholePort)) {
+        servers.push({ s: http.createServer(app), port: portholePort });
+        console.log("[porthole] дополнительный веб-порт " + portholePort + ": у друга http://127.0.0.1:" + portholePort);
+    } else if (process.env.LOCALBOX_PORTHOLE_PORT) {
+        console.error("[porthole] порт " + process.env.LOCALBOX_PORTHOLE_PORT + " не подходит: нужен 1024–65535, кроме 38202/38203");
+    }
+    tlsReload.watch(servers.filter(({ s }) => s instanceof https.Server).map(({ s }) => s), files,
+        { initial, onReload: next => { activeTlsOptions = next.options; } });
 } catch (e) {
     console.error("Не удалось прочитать сертификаты (" + config.ssl.cert + "). Запустите «Сертификат» в лаунчере.");
     process.exit(1);
@@ -266,7 +314,7 @@ servers.forEach(({ s, port }) => {
         if (now - (recentTlsErrors.get(key) || 0) < 10000) return;
         recentTlsErrors.set(key, now);
         if (/unknown ca/i.test(message)) {
-            console.error(`[tls] клиент ${ip || "?"} отклонил локальный сертификат; хранилища доверия не изменяются. В браузере можно подтвердить исключение, если оно доступно; игровой клиент со строгой проверкой TLS может не подключиться`);
+            console.error(`[tls] клиент ${ip || "?"} не доверяет сертификату сервера (порт ${port}). Если это браузер или телефон — откройте http://${serverUrl} (без https), сертификат там не нужен. Если это игра: на Windows один раз нажмите «Обновить сертификат» в LocalBox; на Linux скопируйте в Steam полную строку запуска из лаунчера (с -cafile и SSL_CERT_FILE).`);
         } else {
             console.error("[tls] обрыв на TLS (порт " + port + ", от " + ip + "): " + message);
         }
@@ -279,7 +327,7 @@ servers.forEach(({ s, port }) => {
         else if (err.code === "EADDRINUSE") console.error("порт " + port + " занят — пропускаю");
         else console.error("порт " + port + ": " + err.message + " — пропускаю");
     });
-    s.listen(port, () => { boundPorts++; console.log("LocalBox server: порт " + port); });
+    s.listen(port, () => { boundPorts++; console.log("LocalBox: порт " + port); });
 });
 // Если через 3с не занялся ни один порт — сообщаем внятно.
 setTimeout(() => {

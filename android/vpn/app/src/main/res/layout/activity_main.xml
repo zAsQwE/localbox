@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#090b0f" android:fillViewport="true">
+ <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+   <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="LocalBox" android:textColor="#f0f2f6" android:textSize="30sp" android:textStyle="bold"/>
+   <Button android:id="@+id/settings" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Настройки"/>
+  </LinearLayout>
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Android · игра в вашей сети" android:textColor="#929bab" android:layout_marginBottom="24dp"/>
+  <TextView android:id="@+id/serverStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Сервер остановлен" android:textColor="#deb45c" android:textSize="22sp" android:textStyle="bold"/>
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/portsSummary" android:text="Игра 5555 · HTTP 8080" android:textColor="#929bab" android:layout_marginTop="16dp"/>
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:visibility="gone">
+   <EditText android:id="@+id/gamePort" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:inputType="number" android:text="5555" android:textColor="#f0f2f6" android:singleLine="true" android:contentDescription="Порт игры"/>
+   <EditText android:id="@+id/webPort" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:inputType="number" android:text="8080" android:textColor="#f0f2f6" android:singleLine="true" android:contentDescription="Порт сайта"/>
+  </LinearLayout>
+  <Button android:id="@+id/serverToggle" style="@style/Widget.LocalBox.PrimaryButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Запустить сервер" android:layout_marginTop="8dp"/>
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ИГРОКИ" android:textStyle="bold" android:textColor="#929bab" android:layout_marginTop="24dp"/>
+  <TextView android:id="@+id/joinUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Адрес появится после запуска" android:textColor="#f0f2f6" android:textSize="18sp" android:textIsSelectable="true" android:paddingTop="12dp"/>
+  <TextView android:id="@+id/roomCode" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Комната ещё не создана" android:textColor="#deb45c" android:textSize="20sp" android:textStyle="bold" android:paddingTop="8dp"/>
+  <LinearLayout android:id="@+id/qrPanel" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" android:background="#10141b" android:padding="12dp" android:layout_marginTop="12dp">
+   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="QR-код входа" android:textColor="#f0f2f6"/>
+    <Button android:id="@+id/closeQr" android:layout_width="48dp" android:layout_height="48dp" android:text="×" android:textSize="22sp" android:contentDescription="Закрыть QR-код"/>
+   </LinearLayout>
+   <ImageView android:id="@+id/qr" android:layout_width="180dp" android:layout_height="180dp" android:layout_gravity="center_horizontal" android:contentDescription="QR-код входа"/>
+   <TextView android:id="@+id/qrUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center" android:textDirection="ltr" android:textColor="#f0f2f6" android:textSize="16sp" android:textIsSelectable="true"/>
+  </LinearLayout>
+  <Button android:id="@+id/showQr" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Показать QR-код" android:visibility="gone"/>
+  <Button android:id="@+id/openClient" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Играть на этом телефоне"/>
+  <Button android:id="@+id/shareClient" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Поделиться ссылкой"/>
+  <Button android:id="@+id/importClient" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Скачать или выбрать клиент"/>
+  <TextView android:id="@+id/clientInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Добавьте ZIP с папкой client или client-ru и index.html внутри." android:textColor="#929bab"/>
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ИГРА НА ТЕЛЕФОНЕ" android:textStyle="bold" android:textColor="#929bab" android:layout_marginTop="24dp"/>
+  <Button android:id="@+id/chooseGame" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Выбрать установленную игру"/>
+  <Button android:id="@+id/launchGame" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Открыть игру"/>
+  <Button android:id="@+id/inspectApk" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Выбрать APK для патча"/>
+  <Button android:id="@+id/patchInstalled" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Патч из установленной игры"/>
+  <TextView android:id="@+id/apkInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Выберите APK или установленную игру — LocalBox проверит совместимость." android:textColor="#929bab" android:textIsSelectable="true"/>
+  <CheckBox android:id="@+id/patchSeparate" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ставить копию рядом с оригиналом (удалять игру не нужно)" android:textColor="#f0f2f6" android:checked="true"/>
+  <Button android:id="@+id/patchApk" style="@style/Widget.LocalBox.PrimaryButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Создать APK для LocalBox" android:visibility="gone"/>
+  <Button android:id="@+id/patchResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Установить или сохранить готовый APK" android:visibility="gone"/>
+  <CheckBox android:id="@+id/useVpn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Экспериментальный VPN для выбранной игры" android:textColor="#f0f2f6" android:layout_marginTop="12dp"/>
+  <Button android:id="@+id/vpnToggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Включить перенаправление"/>
+  <TextView android:id="@+id/vpnStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="VPN-перенаправление выключено" android:textColor="#deb45c"/>
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="VPN перенаправляет адрес и порт. Для HTTPS-игры потребуется совместимый патч APK: VPN не меняет проверку сертификата." android:textColor="#929bab"/>
+  <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Готово к настройке" android:textColor="#f0f2f6" android:layout_marginTop="24dp" android:paddingBottom="24dp" android:textIsSelectable="true"/>
+ </LinearLayout>
+</ScrollView>

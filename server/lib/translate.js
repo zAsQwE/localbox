@@ -1,6 +1,6 @@
 "use strict";
 //
-// LocalBox server — перевод внутренних сообщений (entity-store, Ecast-стиль) в события Blobcast
+// LocalBox — перевод внутренних сообщений (entity-store, Ecast-стиль) в события Blobcast
 // (старый протокол): RoomBlobChanged, CustomerJoinedRoom, CustomerMessage и т.п.
 // Собственная реализация LocalBox (описывает лишь формат событий Blobcast).
 //

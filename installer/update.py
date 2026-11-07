@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Verified release downloads and a standalone, rollback-capable LocalBox updater."""
 
+if __package__:
+    from .i18n import tr
+else:
+    from i18n import tr
+
 import argparse
 from contextlib import contextmanager
 import hashlib
@@ -28,14 +33,19 @@ MANIFEST = "installer/payload-sha256.json"
 ROOT_FILES = {"LICENSE", "README.md", "start-server.sh", "start-server.bat", "setup.sh", "install.bat", "version.json"}
 EXCLUDED = {".git", "node_modules", "runtime", "client", "client-ru", "certs", "storage", "cache", "render",
             "test", "tests", "__pycache__", "build", "dist", "piper"}
-PRIVATE_FILES = {"config.json", "localbox-settings.json", "install-paths.json", "update-state.json", "setup-options.ini", "testing.md"}
+PRIVATE_FILES = {"config.json", "localbox-settings.json", "install-paths.json", "update-state.json", "setup-options.ini", "testing.md", "testing.en.md"}
+OBSOLETE_FILES = (
+    "launcher/setup/pack12.py", "tools/connect-pack12.py", "tools/connect-pack12.ps1",
+    "tools/patch-pack12-tls.py", "tools/patch-pack12-tls.ps1",
+    "docs/party-pack-12.md", "docs/party-pack-12.en.md", "launcher/requirements.txt",
+)
 
 
 @contextmanager
 def update_lock(target):
     path = Path(target) / ".localbox-update.lock"
     if path.is_symlink():
-        raise ValueError("Файл блокировки обновления является символьной ссылкой.")
+        raise ValueError(tr('Файл блокировки обновления является символьной ссылкой.'))
     with path.open("a+b") as file:
         if not path.stat().st_size:
             file.write(b"0"); file.flush()
@@ -48,7 +58,7 @@ def update_lock(target):
                 import fcntl
                 fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
-            raise RuntimeError("Эта копия LocalBox уже обновляется в другом окне.") from error
+            raise RuntimeError(tr('Эта копия LocalBox уже обновляется в другом окне.')) from error
         try:
             yield
         finally:
@@ -73,7 +83,7 @@ def update_workspace(target):
 def version_tuple(value):
     match = re.fullmatch(r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", str(value).strip())
     if not match:
-        raise ValueError("Номер версии должен выглядеть как v1.2.0 или 1.2.0.")
+        raise ValueError(tr('Номер версии должен выглядеть как v1.2.0 или 1.2.0.'))
     return tuple(int(part or 0) for part in match.groups())
 
 
@@ -96,13 +106,13 @@ def latest_release(root=None):
         with request(f"https://api.github.com/repos/{REPOSITORY}/releases/latest") as response:
             data = response.read(2 * 1024 * 1024 + 1)
         if len(data) > 2 * 1024 * 1024:
-            raise ValueError("Слишком большой ответ GitHub.")
+            raise ValueError(tr('Слишком большой ответ GitHub.'))
         release = json.loads(data)
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
         if error.code in (403, 429):
-            raise RuntimeError("GitHub ограничил запросы. Повторите проверку позднее.") from error
+            raise RuntimeError(tr('GitHub ограничил запросы. Повторите проверку позднее.')) from error
         raise
     if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
         return None
@@ -115,7 +125,7 @@ def latest_release(root=None):
 def asset_url(asset):
     url = asset.get("browser_download_url", "")
     if not isinstance(url, str) or not url.startswith(RELEASES_URL + "/download/"):
-        raise ValueError("Адрес файла обновления не принадлежит Releases LocalBox.")
+        raise ValueError(tr('Адрес файла обновления не принадлежит Releases LocalBox.'))
     return url
 
 
@@ -123,25 +133,25 @@ def download_release(release, destination, log=print):
     assets = {asset["name"]: asset for asset in release.get("assets", [])}
     asset = assets.get(ASSET_NAME)
     if not asset:
-        raise RuntimeError(f"В выпуске {release['tag_name']} нет {ASSET_NAME}. Автору нужно прикрепить архив к Release.")
+        raise RuntimeError(tr('В выпуске {0} нет {1}. Автору нужно прикрепить архив к Release.', release['tag_name'], ASSET_NAME))
     digest = asset.get("digest") or ""
     if not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest):
         checksum_asset = assets.get("SHA256SUMS")
         if not checksum_asset:
-            raise ValueError("В Release нет SHA-256 для проверки обновления.")
+            raise ValueError(tr('В Release нет SHA-256 для проверки обновления.'))
         with request(asset_url(checksum_asset)) as response:
             data = response.read(65537)
         if len(data) > 65536:
-            raise ValueError("Слишком большой список SHA256SUMS.")
+            raise ValueError(tr('Слишком большой список SHA256SUMS.'))
         matches = re.findall(r"^([a-fA-F0-9]{64})\s+\*?localbox-update\.zip\s*$", data.decode("utf-8"), re.MULTILINE)
         if len(matches) != 1:
-            raise ValueError("В SHA256SUMS отсутствует однозначная сумма архива обновления.")
+            raise ValueError(tr('В SHA256SUMS отсутствует однозначная сумма архива обновления.'))
         digest = "sha256:" + matches[0]
     expected = digest.split(":", 1)[1].lower()
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(".part")
-    log(f"Скачиваю LocalBox {release['tag_name']}…")
+    log(tr('Скачиваю LocalBox {0}…', release['tag_name']))
     try:
         actual = hashlib.sha256()
         size = 0
@@ -149,11 +159,11 @@ def download_release(release, destination, log=print):
             while chunk := response.read(128 * 1024):
                 size += len(chunk)
                 if size > MAX_SIZE:
-                    raise ValueError("Архив обновления слишком большой.")
+                    raise ValueError(tr('Архив обновления слишком большой.'))
                 actual.update(chunk)
                 output.write(chunk)
         if not size or actual.hexdigest() != expected:
-            raise ValueError("SHA-256 обновления не совпала. Файлы приложения не изменены.")
+            raise ValueError(tr('SHA-256 обновления не совпала. Файлы приложения не изменены.'))
         validate_archive(partial, release["tag_name"])
         partial.replace(destination)
         return destination
@@ -178,26 +188,26 @@ def validate_archive(archive_path, expected_version=None):
         entries = archive.infolist()
         names = [entry.filename for entry in entries]
         if len(entries) > 5000 or sum(entry.file_size for entry in entries) > MAX_SIZE:
-            raise ValueError("Слишком большой пакет обновления.")
+            raise ValueError(tr('Слишком большой пакет обновления.'))
         if len({name.casefold() for name in names}) != len(names):
-            raise ValueError("В архиве повторяются пути файлов.")
+            raise ValueError(tr('В архиве повторяются пути файлов.'))
         for entry in entries:
             if not allowed_path(entry.filename) or stat.S_ISLNK(entry.external_attr >> 16) or entry.is_dir():
-                raise ValueError("Недопустимый файл обновления: " + entry.filename)
+                raise ValueError(tr('Недопустимый файл обновления: ') + entry.filename)
         manifest = json.loads(archive.read(MANIFEST))
         if not isinstance(manifest, dict) or set(names) != set(manifest) | {MANIFEST} or MANIFEST in manifest:
-            raise ValueError("Файлы архива не совпадают с манифестом.")
+            raise ValueError(tr('Файлы архива не совпадают с манифестом.'))
         for required in ("server/server.js", "server/package.json", "launcher/localbox_launcher.py", "version.json"):
             if required not in manifest:
-                raise ValueError("Неполный архив обновления: " + required)
+                raise ValueError(tr('Неполный архив обновления: ') + required)
         for name, expected in manifest.items():
             if not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected):
-                raise ValueError("Неверная контрольная сумма: " + name)
+                raise ValueError(tr('Неверная контрольная сумма: ') + name)
             if hashlib.sha256(archive.read(name)).hexdigest() != expected:
-                raise ValueError("Повреждён файл обновления: " + name)
+                raise ValueError(tr('Повреждён файл обновления: ') + name)
         version = json.loads(archive.read("version.json"))["version"]
         if expected_version and version_tuple(version) != version_tuple(expected_version):
-            raise ValueError("Версия архива не совпадает с тегом Release.")
+            raise ValueError(tr('Версия архива не совпадает с тегом Release.'))
         version_tuple(version)
         return manifest
 
@@ -217,7 +227,7 @@ def wait_for_parent(pid, timeout=60):
         if handle:
             try:
                 if kernel.WaitForSingleObject(handle, int(timeout * 1000)) != 0:
-                    raise RuntimeError("Лаунчер не завершился. Обновление отменено.")
+                    raise RuntimeError(tr('Лаунчер не завершился. Обновление отменено.'))
             finally:
                 kernel.CloseHandle(handle)
     else:
@@ -228,7 +238,7 @@ def wait_for_parent(pid, timeout=60):
             except ProcessLookupError:
                 return
             time.sleep(0.1)
-        raise RuntimeError("Лаунчер не завершился. Обновление отменено.")
+        raise RuntimeError(tr('Лаунчер не завершился. Обновление отменено.'))
 
 
 def prepare_dependencies(source, target, log):
@@ -239,12 +249,12 @@ def prepare_dependencies(source, target, log):
     dependencies = json.loads((server / "package.json").read_text()).get("dependencies", {})
     installed = all((old_server / "node_modules" / name / "package.json").is_file() for name in dependencies)
     if same and installed:
-        log("Зависимости сервера уже установлены.")
+        log(tr('Зависимости сервера уже установлены.'))
         return False
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if not npm:
-        raise RuntimeError("Не найден npm. Запустите setup для проверки зависимостей.")
-    log("Подготавливаю зависимости новой версии…")
+        raise RuntimeError(tr('Не найден npm. Запустите setup для проверки зависимостей.'))
+    log(tr('Подготавливаю зависимости новой версии…'))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'launcher'))
     from setup.npm import invocation
     saved = {}
@@ -261,7 +271,7 @@ def prepare_dependencies(source, target, log):
         for line in process.stdout:
             log(line.rstrip())
         if process.wait():
-            raise RuntimeError("Не удалось подготовить npm-зависимости. Прежняя версия сохранена.")
+            raise RuntimeError(tr('Не удалось подготовить npm-зависимости. Прежняя версия сохранена.'))
     (server / "node_modules").mkdir(exist_ok=True)
     return True
 
@@ -269,23 +279,23 @@ def prepare_dependencies(source, target, log):
 def apply_update(archive_path, target, log=print, expected_version=None):
     target = Path(target).resolve()
     if not (target / "server/server.js").is_file():
-        raise ValueError("Не найдена установленная копия LocalBox.")
+        raise ValueError(tr('Не найдена установленная копия LocalBox.'))
     manifest = validate_archive(archive_path, expected_version)
-    for name in manifest:
+    for name in set(manifest) | set(OBSOLETE_FILES):
         destination = target / name
         chain = [destination, *destination.parents]
         chain = chain[:chain.index(target) + 1]
         if any(part.is_symlink() for part in chain):
-            raise ValueError("Путь обновления содержит символьную ссылку: " + name)
+            raise ValueError(tr('Путь обновления содержит символьную ссылку: ') + name)
     if (target / "server/node_modules").is_symlink():
-        raise ValueError("node_modules является ссылкой. Используйте setup для обновления этой установки.")
+        raise ValueError(tr('node_modules является ссылкой. Используйте setup для обновления этой установки.'))
     if (target / ".git").exists():
         git = shutil.which("git")
         if not git:
-            raise RuntimeError("Не найден git для проверки локальных изменений.")
+            raise RuntimeError(tr('Не найден git для проверки локальных изменений.'))
         status = subprocess.run([git, "status", "--porcelain", "--untracked-files=no"], cwd=target, capture_output=True, text=True, check=True)
         if status.stdout.strip():
-            raise RuntimeError("В исходниках есть незакоммиченные изменения. Сохраните их перед обновлением.")
+            raise RuntimeError(tr('В исходниках есть незакоммиченные изменения. Сохраните их перед обновлением.'))
     with update_lock(target), update_workspace(target) as (work, retain_backup):
         source, backup = work / "new", work / "backup"
         source.mkdir(); backup.mkdir()
@@ -318,7 +328,15 @@ def apply_update(archive_path, target, log=print, expected_version=None):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 (source / name).replace(destination)
                 changed.append((name, existed))
-            log(f"LocalBox {current_version(target)} установлен. Настройки и загруженные данные сохранены.")
+            for name in OBSOLETE_FILES:
+                destination = target / name
+                if name not in manifest and destination.is_file():
+                    old = backup / name
+                    old.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(destination, old)
+                    destination.unlink()
+                    changed.append((name, True))
+            log(tr('LocalBox {0} установлен. Настройки и загруженные данные сохранены.', current_version(target)))
         except Exception:
             try:
                 for name, existed in reversed(changed):
@@ -335,8 +353,8 @@ def apply_update(archive_path, target, log=print, expected_version=None):
                         (backup / "node_modules").replace(modules)
             except OSError as error:
                 retain_backup[0] = True
-                raise RuntimeError(f"Не удалось завершить откат. Резервные файлы сохранены: {backup}") from error
-            log("Ошибка обновления. Прежняя версия восстановлена.")
+                raise RuntimeError(tr('Не удалось завершить откат. Резервные файлы сохранены: {0}', backup)) from error
+            log(tr('Ошибка обновления. Прежняя версия восстановлена.'))
             raise
 
 
@@ -349,7 +367,7 @@ def restart(target):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Обновление LocalBox из проверенного архива Release")
+    parser = argparse.ArgumentParser(description=tr('Обновление LocalBox из проверенного архива Release'))
     parser.add_argument("--archive", required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
@@ -370,12 +388,12 @@ def main():
     except Exception as error:
         # No display/Tk: use the same verified update flow without a window.
         if not args.console:
-            print(f"Окно обновления недоступно: {error}")
+            print(tr('Окно обновления недоступно: {0}', error))
         execute(print)
         if not args.no_restart:
             restart(args.target)
         return
-    root.title("LocalBox — обновление")
+    root.title(tr('LocalBox — обновление'))
     fit_window(root)
     from theme import detect_dark
     dark = detect_dark()
@@ -386,9 +404,9 @@ def main():
     style.configure("TFrame", background=bg)
     style.configure("TLabel", background=bg, foreground=fg)
     body = ttk.Frame(root, padding=20); body.pack(fill="both", expand=True)
-    status = tk.StringVar(value="Обновляю LocalBox…")
+    status = tk.StringVar(value=tr('Обновляю LocalBox…'))
     ttk.Label(body, textvariable=status, wraplength=360).pack(anchor="w")
-    button = ttk.Button(body, text="Открыть LocalBox", state="disabled")
+    button = ttk.Button(body, text=tr('Открыть LocalBox'), state="disabled")
     button.pack(side="bottom", fill="x", pady=(12, 0))
     text = tk.Text(body, wrap="word", bg=bg, fg=fg, state="disabled", relief="flat")
     text.pack(fill="both", expand=True, pady=(12, 0))
@@ -404,7 +422,7 @@ def main():
     def worker():
         try:
             execute(lambda message: events.put(("log", str(message))))
-            events.put(("done", "Обновление установлено."))
+            events.put(("done", tr('Обновление установлено.')))
         except Exception as error:
             events.put(("error", str(error)))
     def drain():
@@ -427,7 +445,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print(f"Обновление не установлено: {error}", file=sys.stderr)
+        print(tr('Обновление не установлено: {0}', error), file=sys.stderr)
         sys.exit(1)
     finally:
         work = Path(__file__).resolve().parent

@@ -1,11 +1,12 @@
 # Sourced by linux-deps.sh; follows https://nodejs.org/en/download (nvm).
+source "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"
 localbox_install_nvm_node() (
     set +u
     export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
     if [ ! -s "$NVM_DIR/nvm.sh" ]; then
         localbox_nvm_script=$(mktemp) || return 1
         trap 'rm -f "$localbox_nvm_script"' EXIT
-        printf '%s\n' 'Читаю инструкцию установки Node.js: https://nodejs.org/en/download'
+        printf '%s\n' "$(localbox_text 'Читаю инструкцию установки Node.js: https://nodejs.org/en/download' 'Reading Node.js installation instructions: https://nodejs.org/en/download')"
         localbox_nvm_url=$(python3 "$(dirname "${BASH_SOURCE[0]}")/node_recipe.py") || return 1
         if command -v curl >/dev/null 2>&1; then
             curl -fSL --retry 2 --connect-timeout 10 --max-time 120 "$localbox_nvm_url" -o "$localbox_nvm_script" || return 1
@@ -17,7 +18,7 @@ import sys, urllib.request
 with urllib.request.urlopen(sys.argv[1], timeout=30) as response:
     data = response.read()
 if not data:
-    raise RuntimeError('Пустой установщик nvm')
+    raise RuntimeError('Empty nvm installer')
 with open(sys.argv[2], 'wb') as file:
     file.write(data)
 PY
@@ -31,16 +32,16 @@ PY
 
 localbox_ensure_node() {
     if localbox_use_node; then
-        printf 'Использую установленные Node.js и npm: %s\n' "$(command -v node)"
+        localbox_text 'Использую установленные Node.js и npm: %s\n' 'Using installed Node.js and npm: %s\n' "$(command -v node)"
         return 0
     fi
-    printf '%s\n' 'Node.js 18+ с рабочим npm не найден. Устанавливаю LTS через nvm по инструкции https://nodejs.org/en/download'
+    printf '%s\n' "$(localbox_text 'Node.js 18+ с рабочим npm не найден. Устанавливаю LTS через nvm по инструкции https://nodejs.org/en/download' 'Node.js 18+ with working npm not found. Installing LTS through nvm using https://nodejs.org/en/download')"
     if localbox_install_nvm_node && localbox_use_node; then
-        printf 'Node.js и npm готовы: %s\n' "$(command -v node)"
+        localbox_text 'Node.js и npm готовы: %s\n' 'Node.js and npm ready: %s\n' "$(command -v node)"
         return 0
     fi
-    printf '%s\n' 'Установка Node.js не завершилась. Повторно проверяю систему...'
+    printf '%s\n' "$(localbox_text 'Установка Node.js не завершилась. Повторно проверяю систему...' 'Node.js installation failed. Checking the system again...')"
     if localbox_use_node; then return 0; fi
-    printf '%s\n' 'Не удалось установить Node.js и npm. Инструкция: https://nodejs.org/en/download' >&2
+    printf '%s\n' "$(localbox_text 'Не удалось установить Node.js и npm. Инструкция: https://nodejs.org/en/download' 'Could not install Node.js and npm. Instructions: https://nodejs.org/en/download')" >&2
     return 1
 }

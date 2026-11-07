@@ -1,6 +1,6 @@
 "use strict";
 //
-// LocalBox server — обработка WebSocket-соединений Ecast (роли, welcome, диспетчер опкодов).
+// LocalBox — обработка WebSocket-соединений Ecast (роли, welcome, диспетчер опкодов).
 // Собственная реализация LocalBox.
 //
 
@@ -9,6 +9,7 @@ const mgr = require("./room.js");
 const artifacts = require("./artifacts.js");
 const render = require("./render.js");
 const network = require("./network.js");
+const images = require("./images.js");
 
 const DEBUG = process.env.LOCALBOX_DEBUG === "1";
 
@@ -139,15 +140,35 @@ function dispatch(client, msg) {
 
     // Админ-мьют: правки сущностей от заглушённого игрока игнорируем (но отвечаем ok, чтобы клиент не завис).
     if (room.muted && room.muted.has(client.profileId)
-        && ["object", "text", "number", "doodle", "text-map"].indexOf(type) !== -1
-        && ["create", "set", "update", "increment", "decrement", "push", "sync", "stroke", "undo"].indexOf(action) !== -1) {
+        && ["object", "text", "number", "doodle", "text-map", "image", "stack"].indexOf(type) !== -1
+        && ["create", "set", "update", "increment", "decrement", "push", "pushbulk", "sync", "stroke", "undo", "submit"].indexOf(action) !== -1) {
         return client.sendOk(msg.seq);
     }
 
     switch (op) {
         case "room/lock":
             if (!client.isHost) return client.sendError(msg.seq, 2023);
-            room.locked = true; break;
+            room.locked = true;
+            room.sendToAll({ opcode: "room/lock", result: {} });
+            break;
+        case "room/unlock":
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
+            room.locked = false;
+            room.sendToAll({ opcode: "room/unlock", result: {} });
+            break;
+        case "room/set-password":
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
+            if (typeof p.password !== "string" || p.password.length > 128) return client.sendError(msg.seq, 2004);
+            room.password = p.password || null;
+            break;
+        case "object/echo": case "text/echo": {
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
+            if (p.message === undefined || type === "text" && typeof p.message !== "string") return client.sendError(msg.seq, 2004);
+            const message = { opcode: op, result: { message: p.message } };
+            client.sendEcast(message, msg.seq);
+            room.sendByAcl([{ to: "all" }], message, false, client.profileId);
+            return;
+        }
         case "room/exit":
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             client.sendEcast({ opcode: "room/exit", result: { cause: 5 } }, msg.seq);
@@ -190,18 +211,30 @@ function dispatch(client, msg) {
             room.sendToAll({ opcode: "echo", result: { message: p.message } });
             break;
         case "lock": {
-            if (!client.isHost) return client.sendError(msg.seq, 2023);
+            // Controllers lock their own answers/drawings on submit (Jackbox 12 «SEND»):
+            // allowed for anyone who may write the entity; the host may lock anything.
             const e = room.entities[p.key];
             if (!e) return client.sendError(msg.seq, 2005, "no known entity with key " + p.key);
+            if (!client.isHost) {
+                if (u.aclLockedFor(e.acl, client.role, client.profileId)) return client.sendError(msg.seq, 2023);
+                if (e.locked) return client.sendError(msg.seq, 2028);
+            }
             e.locked = true;
-            room.sendByAcl(e.acl, { opcode: "lock", result: { key: p.key, from: room.host ? room.host.profileId : null } });
+            room.sendByAcl(e.acl, { opcode: "lock", result: { key: p.key, from: client.profileId } });
             break;
         }
         case "game/started":
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             room.gameStarted = true;
+            room.gameFinished = false;
+            room.startSpeechSession();
             break;
-        case "game/metric": case "game/ended": case "text/filter":
+        case "game/ended":
+            if (!client.isHost) return client.sendError(msg.seq, 2023);
+            room.gameFinished = true;
+            room.endSpeechSession();
+            break;
+        case "game/metric": case "text/filter":
             if (!client.isHost) return client.sendError(msg.seq, 2023);
             break;
         case "external-request/create":
@@ -241,7 +274,9 @@ function dispatch(client, msg) {
             return;
         }
         default:
+            if (type === "image") return images.handle(client, room, msg);
             if (type === "audience") return require("./audience.js")(client, room, msg);
+            if (type === "stack") return require("./stack.js")(client, room, msg);
             if (["object", "text", "number", "doodle"].indexOf(type) !== -1) {
                 ok = handleEntity(client, room, msg, type, action);
                 if (ok === undefined) return; // ошибка уже отправлена
@@ -289,6 +324,8 @@ function handleEntity(client, room, msg, type, action) {
         if (!e) { client.sendError(msg.seq, 2005, "no known entity with key " + key); return undefined; }
         if (!client.isHost && (e.locked || u.aclLockedFor(e.acl, role, profileId))) { client.sendError(msg.seq, 2028); return undefined; }
         if (type === "doodle" && action === "stroke") {
+            // As in 1.1.x, a tap (empty or missing point list) is accepted; only non-arrays are invalid.
+            if (p.points != null && !Array.isArray(p.points)) { client.sendError(msg.seq, 2004); return undefined; }
             e.val.lines.push({ color: p.color || "#ffffff", weight: p.weight || 0, layer: p.layer || 0, points: p.points || [], brush: p.brush });
             e.version += 1; e.from = profileId;
         } else if (type === "doodle" && action === "undo") {
@@ -305,7 +342,14 @@ function handleEntity(client, room, msg, type, action) {
         }
     }
 
-    // оповещение (кроме doodle не-create — как на официальном сервере)
+    if (type === "doodle" && ["stroke", "undo"].includes(action) && e.val.live) {
+        const index = action === "stroke" ? e.val.lines.length - 1 : e.val.lines.length;
+        room.sendByAcl(e.acl.filter(rule => rule.read), {
+            opcode: action === "stroke" ? "doodle/line" : "doodle/line/removed",
+            result: { key, from: profileId, index, ...(action === "stroke" ? { val: e.val.lines[index] } : {}) },
+        }, !client.isHost, profileId);
+    }
+    // Non-live drawings are fetched on demand. The sender already appended its own stroke.
     if (!(type === "doodle" && action !== "create")) room.notify(key, !client.isHost, profileId);
     return true;
 }

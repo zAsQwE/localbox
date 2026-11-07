@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Fetch the latest stable release as a verified, fresh installation source."""
 
+if __package__:
+    from .i18n import tr
+else:
+    from i18n import tr
+
 import argparse
 from pathlib import Path
 import shutil
@@ -13,11 +18,11 @@ from update import ASSET_NAME, MANIFEST, download_release, latest_release, valid
 def fetch_latest(destination, log=print):
     destination = Path(destination)
     if destination.exists() and any(destination.iterdir()):
-        raise ValueError("Папка загрузки Release должна быть пустой.")
-    log("Проверяю последний стабильный Release LocalBox…")
+        raise ValueError(tr('Папка загрузки Release должна быть пустой.'))
+    log(tr('Проверяю последний стабильный Release LocalBox…'))
     release = latest_release()
     if release is None:
-        raise RuntimeError("Нет опубликованного стабильного Release LocalBox.")
+        raise RuntimeError(tr('Нет опубликованного стабильного Release LocalBox.'))
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / ASSET_NAME
     payload = destination / "payload"
@@ -33,7 +38,7 @@ def fetch_latest(destination, log=print):
                 if file.suffix == ".sh":
                     file.chmod(0o755)
         (destination / "release-tag.txt").write_text(release["tag_name"], encoding="utf-8")
-        log(f"Устанавливаю Release {release['tag_name']}.")
+        log(tr('Устанавливаю Release {0}.', release['tag_name']))
         return payload
     except Exception:
         shutil.rmtree(payload, ignore_errors=True)
@@ -43,13 +48,13 @@ def fetch_latest(destination, log=print):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Загрузить последний стабильный Release LocalBox")
+    parser = argparse.ArgumentParser(description=tr('Загрузить последний стабильный Release LocalBox'))
     parser.add_argument("--destination", required=True)
     args = parser.parse_args()
     try:
         fetch_latest(args.destination)
     except Exception as error:
-        print(f"Не удалось загрузить Release: {error}", file=sys.stderr)
+        print(tr('Не удалось загрузить Release: {0}', error), file=sys.stderr)
         return 1
     return 0
 

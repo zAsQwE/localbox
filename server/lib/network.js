@@ -19,7 +19,7 @@ function stringify(value, client, serverUrl) {
         try {
             const url = new URL(item);
             if (url.host !== new URL("https://" + serverUrl).host ||
-                !/^\/(?:tts|render|storage|artifact)(?:\/|$)/.test(url.pathname)) return item;
+                !/^\/(?:tts|render|storage|artifact|localbox\/images)(?:\/|$)/.test(url.pathname)) return item;
             return `${secure ? "https" : "http"}://${host}${url.pathname}${url.search}${url.hash}`;
         } catch { return item; }
     });

@@ -1,0 +1,6 @@
+github.com/antst/go-yjs v0.1.1 h1:06xep5/8nl6kNZZ2x+myEkdhCA2zYB30UQhQ9KoaX8g=
+github.com/antst/go-yjs v0.1.1/go.mod h1:U3lPrx8tm3WztmIb3j4RT6gkUR2o7QS0fGbEbLCG1/0=
+github.com/gorilla/websocket v1.5.1 h1:gmztn0JnHVt9JZquRuzLw3g4wouNVzKL15iLr/zn/QY=
+github.com/gorilla/websocket v1.5.1/go.mod h1:x3kM2JMyaluk02fnUJpQuwD2dCS5NDG2ZHL0uE0tcaY=
+golang.org/x/net v0.17.0 h1:pVaXccu2ozPjCXewfr1S7xza/zcXTity9cCdXQYSjIM=
+golang.org/x/net v0.17.0/go.mod h1:NxSsAGuq816PNPmqtQdLE42eU2Fs7NoRIZrHJAlaCOE=

@@ -1,6 +1,7 @@
 ﻿# Background setup worker: resolve the Release before touching the installation.
 param([string]$Source, [string]$Root, [string]$OptionsFile, [switch]$Latest)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-i18n.ps1')
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 try { [Console]::InputEncoding = $OutputEncoding } catch { }
 try { [Console]::OutputEncoding = $OutputEncoding } catch { }
@@ -15,7 +16,7 @@ try {
     & (Join-Path $Root 'installer/windows-bootstrap.ps1') -Root $Root -OptionsFile $OptionsFile
     exit $LASTEXITCODE
 } catch {
-    Write-Host "Установка не завершена: $_"
+    Write-Host (T 'Установка не завершена: {0}' -Values @(($_)))
     exit 1
 } finally {
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }

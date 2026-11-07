@@ -3,30 +3,24 @@
 #   Copyright (C) 2026 LocalBox contributors
 #   Licensed under the GNU Affero General Public License v3 or later.
 #
-"""Определение ОС и путей: hosts-файл, каталоги Steam, корни репозитория."""
+"""Определение ОС, каталогов Steam и корня LocalBox."""
 
 import os
 import sys
 from pathlib import Path
 
-# Хосты Jackbox, которые перенаправляются на локальный сервер в режиме «без домена».
-# ecast/api — API (отвечает наш сервер); jackbox.tv/bundles/cdn — веб-клиент (проксируется).
-JACKBOX_HOSTS = [
+# Дополнительные SAN сертификата для совместимости с игровыми клиентами.
+# Этот список не используется для изменения hosts, DNS или сетевых маршрутов.
+JACKBOX_TLS_NAMES = [
     "ecast.jackboxgames.com",
-    # Backend socket.io старых игр (Blobcast). Игра идёт сюда после GET /room.
     "ecast-prod-use2.jackboxgames.com",
     "api.jackbox.tv",
     "jackbox.tv",
     "www.jackbox.tv",
     "bundles.jackbox.tv",
     "cdn.jackboxgames.com",
-    # Русский клиент (для режима «Играть» на русском)
     "jackbox.fun",
     "www.jackbox.fun",
-    # Backend-серверы jackbox.fun (его клиент спрашивает комнату у них по пути /api/v2/rooms/,
-    # поэтому заворачиваем на наш сервер — наш ecast ответит про нашу комнату).
-    # ВНИМАНИЕ: это приватная инфраструктура jackbox.fun, имена могут со временем меняться —
-    # сверяйтесь с вкладкой Network в DevTools, если перестанет работать.
     "jb-ecast.klucva.ru",
     "server.rujackbox.loamfy.com",
 ]
@@ -52,14 +46,6 @@ def os_name():
     if is_linux():
         return "Linux"
     return sys.platform
-
-
-def hosts_path() -> Path:
-    """Путь к системному hosts-файлу для текущей ОС."""
-    if is_windows():
-        root = os.environ.get("SystemRoot", r"C:\Windows")
-        return Path(root) / "System32" / "drivers" / "etc" / "hosts"
-    return Path("/etc/hosts")
 
 
 def _looks_like_repo(p: Path) -> bool:
@@ -132,7 +118,7 @@ def local_ip() -> str:
 
 
 def has_admin() -> bool:
-    """Есть ли права на правку системных файлов (нужно для hosts и доверия серту)."""
+    """Есть ли права администратора для настройки доступа к низким портам."""
     if is_windows():
         try:
             import ctypes

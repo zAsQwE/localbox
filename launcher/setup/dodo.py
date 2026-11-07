@@ -1,5 +1,7 @@
 """Импорт музыки Додо Ре Ми из установленной игры без изменения исходных файлов."""
 
+from .i18n import tr
+
 from pathlib import Path
 import shutil
 
@@ -11,8 +13,7 @@ def songs_directory(game):
     for path in candidates:
         if path.is_dir() and any(path.glob("*/backing*.ogg")):
             return path
-    raise ValueError("В выбранной папке не найдены games/NopusOpus/songs/<песня>/backing*.ogg. "
-                     "Выберите папку Jackbox Party Pack 10 или непосредственно songs.")
+    raise ValueError(tr('В выбранной папке не найдены games/NopusOpus/songs/<песня>/backing*.ogg. Выберите папку Jackbox Party Pack 10 или непосредственно songs.'))
 
 
 def import_dodo(game, target, log=print):
@@ -35,7 +36,7 @@ def import_dodo(game, target, log=print):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 if destination.resolve() != path.resolve():
                     shutil.copy2(path, destination)
-    log(f"Додо Ре Ми: скопировано файлов музыки — {count}. Файлы игры сохранены.")
+    log(tr('Додо Ре Ми: скопировано файлов музыки — {0}. Файлы игры сохранены.', count))
     return count
 
 

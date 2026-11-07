@@ -1,12 +1,14 @@
 "use strict";
 //
-// LocalBox server — комнаты и синхронизация сущностей (entity store) протокола Ecast.
+// LocalBox — комнаты и синхронизация сущностей (entity store) протокола Ecast.
 // Собственная реализация LocalBox.
 //
 
 const u = require("./util.js");
 const translate = require("./translate.js");
 const textmap = require("./textmap.js");
+const ttsPrewarm = require("./tts-prewarm.js");
+const images = require("./images.js");
 
 // Хук админ-панели (устанавливается из server.js: mgr.setAdminHook). Событие: {t:"entity"|"drop"|"players", ...}.
 let adminHook = null;
@@ -20,9 +22,11 @@ function entityContent(e) {
         case "text": return { val: e.val };
         case "doodle": return { val: e.val };
         case "text-map": return { root: textmap.root(e.doc) };
+        case "image": return images.body(e);
         case "audience/count-group": return { choices: e.choices };
         case "audience/text-ring": return { elements: e.elements };
         case "audience/g-counter": case "audience/pn-counter": return { count: e.count };
+        case "stack": return { size: e.elements.length };
         default: return e.val !== undefined ? { val: e.val } : {};
     }
 }
@@ -39,6 +43,7 @@ class Room {
         this.token = u.makeToken();
         this.locked = false;
         this.gameStarted = false;
+        this.gameFinished = false;
         this.audienceEnabled = !!params.audienceEnabled;
         this.password = params.password || null;
         this.moderatorPassword = params.moderatorPassword || null;
@@ -62,6 +67,8 @@ class Room {
     }
 
     nextPc() { return this.pc++; }
+    startSpeechSession() { ttsPrewarm.start(this); }
+    endSpeechSession() { return ttsPrewarm.ended(this); }
     newProfileId() { return this.nextProfileId++; }
 
     playerCount() {
@@ -90,6 +97,7 @@ class Room {
     }
     // ctxUserId — необязательный userId для перевода в Blobcast (по умолчанию = userId получателя).
     sendTo(profileId, msg, re, ctxUserId) {
+        ttsPrewarm.forwarded(this, profileId, msg);
         const c = this._clientOf(profileId);
         if (!c || c.readyState !== 1) return;
         if (c.server === "blobcast") {
@@ -118,9 +126,10 @@ class Room {
         Object.keys(this.players).forEach((pid) => this.sendTo(Number(pid), msg));
         this.sendToAudience(msg);
     }
-    sendByAcl(acl, msg, sendToHost = true) {
+    sendByAcl(acl, msg, sendToHost = true, exceptProfileId = null) {
         if (sendToHost) this.sendToHost(msg);
         Object.values(this.players).forEach((p) => {
+            if (p.profileId === exceptProfileId) return;
             if (u.aclVisible(acl, p.role, p.profileId)) this.sendTo(p.profileId, msg);
         });
         if (this.audienceCount > 0 && u.aclVisible(acl, "audience", null)) this.sendToAudience(msg);
@@ -135,6 +144,8 @@ class Room {
         const e = this.entities[key];
         if (!e) return;
         const msg = { opcode: e.type, result: this.getBody(key) };
+        if (!notifyHost && ["room", "bc:room"].includes(key) && e.val?.gameFinished === true) this.gameFinished = true;
+        ttsPrewarm.entity(this, key, e.val, e.from);
         emitAdmin(this.code, { t: "entity", type: e.type, body: msg.result });   // God view: любая правка сущности
         if (notifyHost) this.sendToHost(msg);
         Object.values(this.players).forEach((p) => {
@@ -211,6 +222,7 @@ class Room {
     }
     drop(key) {
         const e = this.entities[key];
+        if (e && e.type === "image") images.remove(e);
         if (e && e.doc) e.doc.destroy();
         clearTimeout(this._audiencePush[key]);
         delete this._audiencePush[key];
@@ -391,6 +403,8 @@ class Room {
     close() {
         if (this.closed) return;
         this.closed = true;
+        images.closeRoom(this);
+        ttsPrewarm.close(this);
         if (rooms[this.code] === this) delete rooms[this.code];
         this.sendToAll({ opcode: "room/exit", result: { cause: 5 } });
         const profiles = [...Object.values(this.players), ...(this.host ? [this.host] : [])];

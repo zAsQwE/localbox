@@ -1,4 +1,5 @@
 ﻿# PowerShell 5.1: reuse working dependencies from the runtime, PATH and known install locations.
+. (Join-Path $PSScriptRoot 'windows-i18n.ps1')
 function Invoke-ToolProbe([string]$File, [string[]]$Arguments) {
     # Windows PowerShell turns native stderr into ErrorRecords. A failed probe is
     # an expected result, not a terminating error in the installer's transcript.
@@ -55,7 +56,7 @@ function Get-NodeTools([string]$Node) {
     if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) { return $null }
     if (-not (Invoke-ToolProbe $Node @($cli, '--version'))) { return $null }
     if (-not (Invoke-ToolProbe $Node @((Join-Path $PSScriptRoot 'check-npm.js'), $npmRoot))) {
-        Write-Host "npm не проходит проверку модулей установки: $npmRoot"
+        Write-Host (T 'npm не проходит проверку модулей установки: {0}' -Values @(($npmRoot)))
         return $null
     }
     $npm = Join-Path $directory 'npm.cmd'

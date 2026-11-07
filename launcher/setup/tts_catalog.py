@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 from . import platform as plat, settings, runtime
+from .i18n import tr
 
 PIPER_LABELS = {"ru_RU-denis-medium": "Денис", "ru_RU-dmitri-medium": "Дмитрий",
                 "ru_RU-irina-medium": "Ирина", "ru_RU-ruslan-medium": "Руслан"}
@@ -43,7 +44,7 @@ def installed_voices(cfg=None):
                          and metadata["audio"]["sample_rate"] > 0
                          and isinstance(metadata.get("phoneme_id_map"), dict) and metadata["phoneme_id_map"])
                 if model.is_file() and model.stat().st_size > 0 and ready:
-                    voices.append({"engine": "piper", "voice": voice, "label": "Piper · " + PIPER_LABELS[voice]})
+                    voices.append({"engine": "piper", "voice": voice, "label": "Piper · " + tr(PIPER_LABELS[voice])})
             except (OSError, ValueError):
                 continue
     espeak = shutil.which("espeak-ng") or shutil.which("espeak")
@@ -51,7 +52,7 @@ def installed_voices(cfg=None):
         try:
             result = subprocess.run([espeak, "--voices=ru"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0 and any(" ru " in " " + line + " " for line in result.stdout.splitlines()[1:]):
-                voices.append({"engine": "espeak", "voice": "ru", "label": "eSpeak · русский"})
+                voices.append({"engine": "espeak", "voice": "ru", "label": tr("eSpeak · русский")})
         except (OSError, subprocess.TimeoutExpired):
             pass
     return voices

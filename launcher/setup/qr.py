@@ -1,5 +1,7 @@
 """Local QR requests and positioning within one physical monitor."""
 
+from .i18n import tr
+
 import base64
 from dataclasses import dataclass
 import json
@@ -34,7 +36,7 @@ class QRClient:
             with self.opener.open(url, timeout=2) as response:
                 png = response.read()
             if not png.startswith(b"\x89PNG\r\n\x1a\n"):
-                raise ValueError("Сервер вернул некорректное изображение QR-кода.")
+                raise ValueError(tr('Сервер вернул некорректное изображение QR-кода.'))
             self.image = base64.b64encode(png).decode("ascii")
             self.key = key
         return room, self.image
@@ -114,11 +116,19 @@ def monitor_layout():
     return monitors
 
 
-def overlay_position(width, height, monitors, anchor, fallback):
-    """Use the launcher's monitor, not the corner of the virtual desktop's bounding box."""
+CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
+
+
+def overlay_position(width, height, monitors, anchor, fallback, corner="bottom-right"):
+    """Place the overlay in a corner of the launcher's monitor, not of the virtual desktop's
+    bounding box. Unknown corners fall back to bottom-right."""
     ax, ay = anchor
     monitor = next((m for m in monitors if m.x <= ax < m.x + m.width and m.y <= ay < m.y + m.height), None)
     if monitor is None:
         monitor = next((m for m in monitors if m.primary), monitors[0] if monitors else fallback)
-    return (max(monitor.x, monitor.x + monitor.width - width - 24),
-            max(monitor.y, monitor.y + monitor.height - height - 48))
+    if corner not in CORNERS:
+        corner = "bottom-right"
+    vertical, horizontal = corner.split("-")
+    x = monitor.x + 24 if horizontal == "left" else monitor.x + monitor.width - width - 24
+    y = monitor.y + 24 if vertical == "top" else monitor.y + monitor.height - height - 48
+    return (max(monitor.x, x), max(monitor.y, y))

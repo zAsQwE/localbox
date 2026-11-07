@@ -8,6 +8,8 @@ Silero — через server/tts/silero_worker.py (--sample); espeak — нап�
 
 from __future__ import annotations
 
+from .i18n import tr
+
 import os
 import shutil
 import subprocess
@@ -17,7 +19,7 @@ import tempfile
 from . import platform as plat
 from . import settings
 
-SAMPLE_TEXT = "Привет! Это мой голос для игр Джекбокс."
+SAMPLE_TEXT = 'Привет! Это мой голос для игр Джекбокс.'
 
 
 def _py():
@@ -76,14 +78,14 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
     for eng in order:
         if eng == "silero" and worker.exists():
             try:
-                log("Генерирую образец (Silero — первый раз качается модель ~60МБ, подождите)…")
+                log(tr('Генерирую образец (Silero — первый раз качается модель ~60МБ, подождите)…'))
                 env = _py_env({"LOCALBOX_TTS_VOICE": voice})
                 r = subprocess.run([py, str(worker), "--sample", voice, out],
                                    capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=600)
                 if r.returncode == 0 and sized():
                     return _boost(out, log)
                 if engine == "silero":
-                    log("Silero недоступен: " + ((r.stderr or r.stdout or "").strip()[:200] or "нужен pip install torch numpy"))
+                    log(tr('Silero недоступен: ') + ((r.stderr or r.stdout or "").strip()[:200] or tr('нужен pip install torch numpy')))
             except Exception as e:  # noqa: BLE001
                 log(f"Silero: {e}")
         elif eng == "piper":
@@ -94,10 +96,10 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
                 # только .onnx без конфига, Piper падает при синтезе с непонятной ошибкой (напр.
                 # "wave.Error: # channels not specified") — поэтому проверяем оба файла, не один.
                 if not ((piper_dir / (v + ".onnx")).exists() and (piper_dir / (v + ".onnx.json")).exists()):
-                    log(f"Скачиваю голос Piper {v} (один раз, нужен интернет)…")
+                    log(tr('Скачиваю голос Piper {0} (один раз, нужен интернет)…', v))
                     subprocess.run([py, "-m", "piper.download_voices", v, "--data-dir", str(piper_dir)],
                                    capture_output=True, text=True, encoding="utf-8", errors="replace", env=_py_env(), timeout=600)
-                log(f"Генерирую образец (Piper, {v})…")
+                log(tr('Генерирую образец (Piper, {0})…', v))
                 r = subprocess.run([py, "-m", "piper", "-m", v, "--data-dir", str(piper_dir), "-f", out],
                                    input=SAMPLE_TEXT, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                    env=_py_env(), timeout=600)
@@ -105,13 +107,13 @@ def _make_sample(engine: str, voice: str, log) -> str | None:
                     return _boost(out, log)
                 if engine == "piper":
                     err = (r.stderr or "").strip()
-                    log("Piper: " + (err.splitlines()[-1][:200] if err else "нужен pip install piper-tts"))
+                    log("Piper: " + (err.splitlines()[-1][:200] if err else tr('нужен pip install piper-tts')))
             except Exception as e:  # noqa: BLE001
                 log(f"Piper: {e}")
         elif eng == "espeak":
             esp = shutil.which("espeak-ng") or shutil.which("espeak")
             if esp:
-                log("Генерирую образец (espeak)…")
+                log(tr('Генерирую образец (espeak)…'))
                 r = subprocess.run([esp, "-v", _espeak_voice(voice), "-w", out, SAMPLE_TEXT], capture_output=True)
                 if r.returncode == 0 and sized():
                     return _boost(out, log)
@@ -138,9 +140,9 @@ def preview(engine: str, voice: str, log=print) -> None:
     """Создаёт и проигрывает образец. Блокирующе — вызывать в отдельном потоке."""
     path = _make_sample(engine, voice, log)
     if not path:
-        log("Не удалось создать образец. Для Silero: pip install torch numpy. Для espeak: поставьте espeak-ng.")
+        log(tr('Не удалось создать образец. Для Silero: pip install torch numpy. Для espeak: поставьте espeak-ng.'))
         return
-    log(f"▶ Играет образец голоса «{voice}»…")
+    log(tr('▶ Играет образец голоса «{0}»…', voice))
     try:
         if plat.is_windows():
             import winsound
@@ -148,7 +150,7 @@ def preview(engine: str, voice: str, log=print) -> None:
             return
         pl = "afplay" if plat.is_macos() and shutil.which("afplay") else _player()
         if not pl:
-            log("Нет аудиоплеера. Поставьте pulseaudio-utils / alsa-utils / ffmpeg / mpv.")
+            log(tr('Нет аудиоплеера. Поставьте pulseaudio-utils / alsa-utils / ffmpeg / mpv.'))
             return
         args = {
             "ffplay": [pl, "-nodisp", "-autoexit", "-loglevel", "quiet", path],
@@ -157,7 +159,7 @@ def preview(engine: str, voice: str, log=print) -> None:
         }.get(pl, [pl, path])
         subprocess.run(args, timeout=30)
     except Exception as e:  # noqa: BLE001
-        log(f"Плеер: {e}")
+        log(tr('Плеер: {0}', e))
     finally:
         try:
             os.remove(path)

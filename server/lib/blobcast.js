@@ -1,6 +1,6 @@
 "use strict";
 //
-// LocalBox server — HTTP-маршруты Blobcast (старые игры): socket.io-handshake, комнаты,
+// LocalBox — HTTP-маршруты Blobcast (старые игры): socket.io-handshake, комнаты,
 // токены доступа, артефакты и пользовательский контент. Собственная реализация LocalBox.
 //
 

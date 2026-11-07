@@ -1,0 +1,19 @@
+# Сборочный мусор Android/Gradle — не коммитим (готовый .apk кладём в GitHub Releases).
+**/build/
+**/.gradle/
+**/.kotlin/
+**/local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.cache/
+dist/
+**/src/main/jniLibs/
+**/src/main/assets/games.json
+
+# Бинарь Go-сервера (собирается локально)
+server/androidserver
+server/localbox-*
+server/liblocalbox_server.so

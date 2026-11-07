@@ -14,6 +14,7 @@ const path = require("path");
 const https = require("https");
 const admin = require("./lib/admin.js");
 const { layoutPaths } = require("./lib/client-paths.js");
+const clientUpdates = require("./lib/client-updates.js");
 
 const CLIENT_DIR = path.resolve(__dirname, process.env.LOCALBOX_CLIENT_DIR || "../client");
 // Сначала выбранный клиент, затем явно заданный фоллбэк, затем соседние client/ и client-ru/.
@@ -66,6 +67,16 @@ const REWRITE_HOSTS = [
 // (codeLength) — при заданном LOCALBOX_ROOM_CODE ослабляем это в раздаваемом клиенте, чтобы можно
 // было ввести код другой длины. Новый клиент дополнительно удаляет кириллицу при вводе.
 const ANY_CODE = !!(process.env.LOCALBOX_ROOM_CODE || "").trim();
+// Бредовуха 2 (Fibbage 2): на ПК Bootstrap задаёт .container фиксированную ширину (750–1170px),
+// а правило игры `.container, .button-container { margin: 5px }` убирает margin: auto, и кнопки
+// прижимаются к левому краю под центрированной шапкой. На телефоне контейнер во всю ширину, там ровно.
+const LEFT_PINNED_CONTAINER = /\.container\s*,\s*\.button-container\s*\{\s*margin:\s*5px\s*;?\s*\}/;
+function patchLayout(text) {
+    if (!LEFT_PINNED_CONTAINER.test(text)) return text;
+    return text + "\n/* LocalBox: центрировать блок на широком экране */\n" +
+        "@media (min-width: 768px) { .container { margin-left: auto; margin-right: auto; } }\n";
+}
+
 function patchRoomCode(text) {
     if (!ANY_CODE || text.indexOf("this.codeLength") === -1) return text;
     return text
@@ -136,7 +147,14 @@ function rewrite(text, host, secure) {
             ? prefix + quote + hostname + quote : match
     );
     for (const h of REWRITE_HOSTS) out = out.split(h).join(target);
+    out = out.split("https://cdn.jackboxgames.com/reaction/").join("/localbox/cdn/reaction/")
+        .split("https://cdn.jackboxgames.com/twemoji/assets/72x72/").join("/localbox/cdn/twemoji/assets/72x72/");
     out = out.replace(/\sintegrity=("|')[^"']*\1/gi, "");
+    // jackbox.tv loads Google Tag Manager, which pulls in the CookieYes consent banner.
+    // CookieYes throws "Looks like your website URL has changed" on any host but jackbox.tv,
+    // and the client then shows its "You have encountered an error" screen. Serve an empty
+    // script instead: analytics only, nothing the game needs (and no tracking offline).
+    out = out.split("https://www.googletagmanager.com/gtm.js").join("data:text/javascript,");
     if (!secure) {
         // Страница открыта по http → понижаем API/ws на нашем хосте до http/ws. Иначе браузер
         // режет http→https по CORS, а самоподписанный серт не доверен (игрок «не может зайти»).
@@ -158,10 +176,17 @@ function sendBuffer(buf, ext, req, res) {
         const secure = !!(req.socket && req.socket.encrypted); // страница отдана по https?
         let html = rewrite(buf.toString("utf8"), reqHost, secure);
         if (ext === ".js" || ext === ".mjs") html = patchRoomCode(html);   // гибкая длина кода комнаты (русский/кастомный)
+        if (ext === ".css") html = patchLayout(html);
         // Вставляем админ-оверлей (панельку читов) в HTML-страницы, если включены админы.
         if (ext === ".html" && admin.enabled()) {
             const tag = '<script src="/admin/overlay.js"></script>';
             html = /<head(?:\s[^>]*)?>/i.test(html) ? html.replace(/<head(?:\s[^>]*)?>/i, (head) => head + tag) : tag + html;
+        }
+        if (ext === ".html") {
+            const catalog = JSON.stringify(clientUpdates.catalog()).replace(/</g, "\\u003c");
+            const bridge = `<script type="application/json" id="localbox-controllers">${catalog}</script><script src="/localbox/client/bridge.js" data-localbox-client="preferred"></script>`;
+            html = html.replace(/<head(?:\s[^>]*)?>/i, head => head + bridge);
+            res.setHeader("Cache-Control", "no-store");
         }
         res.end(html);
     } else {
@@ -205,7 +230,7 @@ function fetchAndCache(urlPath, req, res, next) {
 }
 
 module.exports = function localboxClient(req, res, next) {
-    if (!enabled || !["GET", "HEAD"].includes(req.method)) return next();
+    if (noWeb || !["GET", "HEAD"].includes(req.method)) return next();
 
     // New connect clients request this JSON endpoint despite its .png suffix.
     // Keep their browser identity local and stable across page reloads.

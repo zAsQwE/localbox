@@ -1,6 +1,8 @@
 ﻿# Windows 10/11: download settings, no wizard pages and no Python prerequisite.
-param([string]$Source = '', [switch]$Latest)
+param([string]$Source = '', [switch]$Latest, [ValidateSet('', 'ru', 'en')][string]$Language = '')
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-i18n.ps1')
+if ($Language) { Set-LocalBoxLanguage $Language }
 if (-not $Source) { $Source = Split-Path $PSScriptRoot -Parent }
 $Source = [IO.Path]::GetFullPath($Source)
 . (Join-Path $PSScriptRoot 'windows-process.ps1')
@@ -17,7 +19,7 @@ public static class LocalBoxWindowTheme {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="LocalBox"
-        Width="680" Height="720" MinWidth="420" MinHeight="340" WindowStartupLocation="CenterScreen"
+        Width="960" Height="620" MinWidth="480" MinHeight="320" WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI" FontSize="14" Background="{DynamicResource Bg}" Foreground="{DynamicResource Fg}">
   <Window.Resources>
     <SolidColorBrush x:Key="Bg" Color="#F5F5F5"/>
@@ -126,52 +128,68 @@ public static class LocalBoxWindowTheme {
       </Setter.Value></Setter>
     </Style>
   </Window.Resources>
-  <Grid Margin="24,18">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <TextBlock Text="LocalBox" FontSize="28" FontWeight="SemiBold" Margin="0,0,0,16"/>
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel x:Name="Settings">
-        <TextBlock Text="Куда скачать LocalBox" TextWrapping="Wrap" Margin="0,0,0,6"/>
-        <DockPanel><Button x:Name="AppBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="AppPath"/></DockPanel>
-        <TextBlock Text="Папка зависимостей и TTS" TextWrapping="Wrap" Margin="0,12,0,6"/>
-        <DockPanel><Button x:Name="RuntimeBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="RuntimePath"/></DockPanel>
-        <TextBlock Text="Озвучка" FontWeight="SemiBold" Margin="0,20,0,7"/>
+  <Viewbox Stretch="Uniform" StretchDirection="DownOnly" VerticalAlignment="Top">
+  <Grid Margin="20,14" Width="880">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <DockPanel Margin="0,0,0,14">
+      <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+        <TextBlock Text="Language / Язык" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <ComboBox x:Name="Language" Width="120">
+          <ComboBoxItem Content="Русский" Tag="ru"/><ComboBoxItem Content="English" Tag="en"/>
+        </ComboBox>
+      </StackPanel>
+      <TextBlock Text="LocalBox" FontSize="28" FontWeight="SemiBold"/>
+    </DockPanel>
+    <Grid x:Name="Settings" Grid.Row="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <StackPanel>
+        <TextBlock Text="Куда скачать LocalBox" Margin="0,0,0,4"/>
+        <DockPanel><Button x:Name="AppBrowse" Content="…" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="AppPath"/></DockPanel>
+        <TextBlock Text="Зависимости и TTS" Margin="0,10,0,4"/>
+        <DockPanel><Button x:Name="RuntimeBrowse" Content="…" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="RuntimePath"/></DockPanel>
+        <TextBlock Text="Озвучка" FontWeight="SemiBold" Margin="0,14,0,6"/>
         <ComboBox x:Name="Tts" SelectedIndex="0">
           <ComboBoxItem Content="Piper — нейроголоса" Tag="piper"/><ComboBoxItem Content="Silero — русские нейроголоса" Tag="silero"/>
           <ComboBoxItem Content="Piper + Silero" Tag="both"/><ComboBoxItem Content="Без озвучки" Tag="none"/>
         </ComboBox>
-        <WrapPanel x:Name="Voices" Margin="0,8,0,0">
+        <UniformGrid x:Name="Voices" Columns="2" Margin="0,8,0,0">
           <CheckBox x:Name="Denis" Content="Денис" Tag="ru_RU-denis-medium" IsChecked="True"/>
           <CheckBox x:Name="Dmitri" Content="Дмитрий" Tag="ru_RU-dmitri-medium"/><CheckBox x:Name="Irina" Content="Ирина" Tag="ru_RU-irina-medium"/><CheckBox x:Name="Ruslan" Content="Руслан" Tag="ru_RU-ruslan-medium"/>
-        </WrapPanel>
+        </UniformGrid>
         <TextBlock x:Name="TtsHint" Text="Скачаются только отмеченные голоса." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
-        <CheckBox x:Name="Dodo" Content="Поддержка Додо Ре Ми" Margin="0,20,0,4"/>
-        <TextBlock Text="Папка Jackbox Party Pack 10 — необязательно" TextWrapping="Wrap" Margin="0,6,0,6"/>
-        <DockPanel><Button x:Name="GameBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="GamePath" IsEnabled="False"/></DockPanel>
-        <CheckBox x:Name="Cheat" Content="Указать папку с играми для читов" Margin="0,20,0,4"/>
-        <TextBlock Text="Папка со всеми Jackbox или отдельной игрой — необязательно" TextWrapping="Wrap" Margin="0,6,0,6"/>
-        <DockPanel><Button x:Name="CheatBrowse" Content="Обзор…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="CheatPath" IsEnabled="False"/></DockPanel>
-        <TextBlock Text="Файлы игр читаются на месте. Без выбранной папки — поиск в Steam." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,5,0,0"/>
-        <CheckBox x:Name="Russian" Content="Скачать русский веб-клиент" Margin="0,16,0,4"/>
+        <CheckBox x:Name="Russian" Content="Скачать русский веб-клиент" Margin="0,12,0,4"/>
       </StackPanel>
-    </ScrollViewer>
-    <Expander x:Name="Details" Grid.Row="2" Header="Журнал" Visibility="Collapsed" Foreground="{DynamicResource Fg}" Margin="0,12,0,0">
-      <TextBox x:Name="Log" IsReadOnly="True" Height="120" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0"/>
-    </Expander>
-    <ProgressBar x:Name="Progress" Grid.Row="3" Height="4" IsIndeterminate="True" Visibility="Collapsed" Foreground="{DynamicResource Accent}" Background="{DynamicResource Field}" Margin="0,10,0,0"/>
-    <DockPanel Grid.Row="4" Margin="0,14,0,0">
-      <Button x:Name="Download" DockPanel.Dock="Right" Content="Скачать" Width="170" Background="{DynamicResource Accent}" Foreground="{DynamicResource OnAccent}" BorderBrush="{DynamicResource Accent}" Margin="16,0,0,0"/>
+      <StackPanel Grid.Column="2">
+        <CheckBox x:Name="Tmp3" Content="Патч Смертельной вечеринки 3" Margin="0,0,0,4"/>
+        <TextBlock Text="Папка Trivia Murder Party 3" Margin="0,4,0,4"/>
+        <DockPanel><Button x:Name="Tmp3Browse" Content="…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="Tmp3Path" IsEnabled="False"/></DockPanel>
+        <TextBlock Text="Закрой игру. Оригинал сохранится для отката." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+        <CheckBox x:Name="Trust" Content="Сделать сертификат доверенным для игр Jackbox (рекомендуется)" IsChecked="True" Margin="0,12,0,4"/>
+        <CheckBox x:Name="Dodo" Content="Поддержка Додо Ре Ми" Margin="0,12,0,4"/>
+        <TextBlock Text="Jackbox Party Pack 10 — необязательно" Margin="0,4,0,4"/>
+        <DockPanel><Button x:Name="GameBrowse" Content="…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="GamePath" IsEnabled="False"/></DockPanel>
+        <CheckBox x:Name="Cheat" Content="Папка с играми для читов" Margin="0,12,0,4"/>
+        <TextBlock Text="Все Jackbox или отдельная игра" Margin="0,4,0,4"/>
+        <DockPanel><Button x:Name="CheatBrowse" Content="…" DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/><TextBox x:Name="CheatPath" IsEnabled="False"/></DockPanel>
+        <TextBlock Text="Без папки — поиск игр в Steam." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+      </StackPanel>
+    </Grid>
+    <ProgressBar x:Name="Progress" Grid.Row="2" Height="4" IsIndeterminate="True" Visibility="Hidden" Foreground="{DynamicResource Accent}" Background="{DynamicResource Field}" Margin="0,10,0,0"/>
+    <DockPanel Grid.Row="3" Margin="0,12,0,0">
+      <Button x:Name="Download" DockPanel.Dock="Right" Content="Скачать" Width="150" Background="{DynamicResource Accent}" Foreground="{DynamicResource OnAccent}" BorderBrush="{DynamicResource Accent}" Margin="12,0,0,0"/>
+      <Button x:Name="Details" DockPanel.Dock="Right" Content="Журнал" Margin="12,0,0,0"/>
       <TextBlock x:Name="Status" Text="Зависимости и выбранные голоса скачаются автоматически." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" VerticalAlignment="Center"/>
     </DockPanel>
   </Grid>
+  </Viewbox>
 </Window>
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $area = [Windows.SystemParameters]::WorkArea
 $window.MinWidth = [Math]::Min(420, [Math]::Max(200, $area.Width - 24))
 $window.MinHeight = [Math]::Min(340, [Math]::Max(200, $area.Height - 24))
-$window.Width = [Math]::Min(680, [Math]::Max(200, $area.Width - 24))
-$window.Height = [Math]::Min(720, [Math]::Max(200, $area.Height - 24))
+$window.Width = [Math]::Min(960, [Math]::Max(200, $area.Width - 24))
+$window.Height = [Math]::Min(620, [Math]::Max(200, $area.Height - 24))
 
 function Fit-SetupScreen {
     $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
@@ -189,10 +207,29 @@ function Fit-SetupScreen {
         $window.Width = [Math]::Min($window.Width, $window.MaxWidth - 24)
         $window.Height = [Math]::Min($window.Height, $window.MaxHeight - 24)
     }
-    $ui.Log.Height = [Math]::Min(120, [Math]::Max(48, $available.Y * 0.18))
 }
 $ui = @{}
-foreach ($name in @('Settings','AppPath','AppBrowse','RuntimePath','RuntimeBrowse','Tts','Voices','TtsHint','Dodo','GamePath','GameBrowse','Cheat','CheatPath','CheatBrowse','Russian','Details','Log','Progress','Download','Status')) { $ui[$name] = $window.FindName($name) }
+foreach ($name in @('Language','Settings','AppPath','AppBrowse','RuntimePath','RuntimeBrowse','Tts','Voices','TtsHint','Dodo','GamePath','GameBrowse','Tmp3','Tmp3Path','Tmp3Browse','Cheat','CheatPath','CheatBrowse','Russian','Trust','Details','Log','Progress','Download','Status')) { $ui[$name] = $window.FindName($name) }
+$logWindow = New-Object Windows.Window
+$logWindow.Title = (T 'LocalBox — журнал установки')
+$logWindow.Width = [Math]::Min(760, $area.Width - 24)
+$logWindow.Height = [Math]::Min(400, $area.Height - 24)
+$ui.Log = New-Object Windows.Controls.TextBox
+$ui.Log.IsReadOnly = $true
+$ui.Log.TextWrapping = 'Wrap'
+$ui.Log.VerticalScrollBarVisibility = 'Auto'
+$ui.Log.Margin = '12'
+$logWindow.Content = $ui.Log
+$script:closing = $false
+$logWindow.Add_Closing({ param($sender, $eventArgs)
+    if (-not $script:closing) { $eventArgs.Cancel = $true; $logWindow.Hide() }
+})
+function Show-SetupLog {
+    if (-not $logWindow.Owner) { $logWindow.Owner = $window }
+    $logWindow.Show()
+    [void]$logWindow.Activate()
+}
+$ui.Details.Add_Click({ Show-SetupLog })
 $script:running = $false
 $script:installed = $null
 $script:process = $null
@@ -227,6 +264,10 @@ function Update-Theme {
                     Error=[Windows.SystemColors]::WindowTextColor; Success=[Windows.SystemColors]::WindowTextColor}
     }
     foreach ($name in $colors.Keys) { $window.Resources[$name] = [Windows.Media.BrushConverter]::new().ConvertFromString([string]$colors[$name]) }
+    $logWindow.Background = $window.Resources['Bg']
+    $ui.Log.Background = $window.Resources['Field']
+    $ui.Log.Foreground = $window.Resources['Fg']
+    $ui.Log.CaretBrush = $window.Resources['Fg']
     $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
     if ($handle -ne [IntPtr]::Zero) {
         $value = [int]$dark
@@ -241,6 +282,7 @@ function Load-GamePaths {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return }
         if ($script:loadedTarget -eq $ui.AppPath.Text) { return }
         $saved = Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
+        $ui.Tmp3Path.Text = [string]$saved.tmp3_path
         $ui.GamePath.Text = [string]$saved.jackbox10_path
         $ui.Dodo.IsChecked = [bool]$saved.dodo_render
         $ui.CheatPath.Text = [string]$saved.cheat_content_dir
@@ -252,11 +294,39 @@ function Load-GamePaths {
 function Update-Options {
     $piper = $ui.Tts.SelectedItem.Tag -in @('piper', 'both')
     $ui.Voices.IsEnabled = $piper
-    $ui.TtsHint.Text = if ($piper) { 'Скачаются только отмеченные голоса.' } elseif ($ui.Tts.SelectedItem.Tag -eq 'silero') { 'Скачаются все встроенные русские голоса.' } else { '' }
+    $ui.TtsHint.Text = if ($piper) { (T 'Скачаются только отмеченные голоса.') } elseif ($ui.Tts.SelectedItem.Tag -eq 'silero') { (T 'Скачаются все встроенные русские голоса.') } else { '' }
+    $ui.Tmp3Path.IsEnabled = $ui.Tmp3.IsChecked -eq $true
+    $ui.Tmp3Browse.IsEnabled = $ui.Tmp3.IsChecked -eq $true
     $ui.GamePath.IsEnabled = $ui.Dodo.IsChecked -eq $true
     $ui.GameBrowse.IsEnabled = $ui.Dodo.IsChecked -eq $true
     $ui.CheatPath.IsEnabled = $ui.Cheat.IsChecked -eq $true
     $ui.CheatBrowse.IsEnabled = $ui.Cheat.IsChecked -eq $true
+}
+
+# Retain source messages so repeated language changes never translate an English
+# translation back as if it were a message identifier.
+$script:localizedControls = [Collections.Generic.List[object]]::new()
+function Register-LocalizedControls($Control) {
+    if ($Control -is [Windows.Controls.TextBlock]) { $property = 'Text' }
+    elseif ($Control -is [Windows.Controls.ContentControl] -and $Control.Content -is [string]) { $property = 'Content' }
+    else { $property = $null }
+    if ($property -and $Control.$property -match '[А-Яа-яЁё]' -and $Control.$property -notin @('Language / Язык', 'Русский')) {
+        $script:localizedControls.Add(@{Control=$Control; Property=$property; Message=[string]$Control.$property})
+    }
+    foreach ($child in [Windows.LogicalTreeHelper]::GetChildren($Control)) {
+        if ($child -is [Windows.DependencyObject]) { Register-LocalizedControls $child }
+    }
+}
+function Apply-SetupLanguage {
+    if ($script:running -or $script:installed) { return }
+    Set-LocalBoxLanguage ([string]$ui.Language.SelectedItem.Tag)
+    foreach ($entry in $script:localizedControls) { $entry.Control.($entry.Property) = T $entry.Message }
+    $logWindow.Title = T 'LocalBox — журнал установки'
+    if ($env:LOCALBOX_LANGUAGE -eq 'en') {
+        $ui.Russian.IsChecked = $false
+        $ui.Russian.Visibility = 'Collapsed'
+    } else { $ui.Russian.Visibility = 'Visible' }
+    Update-Options
 }
 
 function Browse-Folder($Field) {
@@ -271,39 +341,47 @@ function Start-Download {
     if ($script:running) { return }
     if ($script:installed) {
         try { Start-Process -FilePath (Join-Path $script:installed 'start-server.bat') -ArgumentList '--gui' -WorkingDirectory $script:installed; $window.Close() }
-        catch { Set-Status ('Не удалось открыть LocalBox: ' + $_.Exception.Message) 'Error' }
+        catch { Set-Status ((T 'Не удалось открыть LocalBox: ') + $_.Exception.Message) 'Error' }
         return
     }
     try {
-        if (-not $ui.AppPath.Text.Trim() -or -not $ui.RuntimePath.Text.Trim()) { throw 'Укажите папки для LocalBox и зависимостей.' }
+        if (-not $ui.AppPath.Text.Trim() -or -not $ui.RuntimePath.Text.Trim()) { throw (T 'Укажите папки для LocalBox и зависимостей.') }
         $target = [IO.Path]::GetFullPath($ui.AppPath.Text.Trim())
         $runtime = [IO.Path]::GetFullPath($ui.RuntimePath.Text.Trim())
         $voices = @($ui.Voices.Children | Where-Object { $_.IsChecked } | ForEach-Object { $_.Tag })
         $tts = [string]$ui.Tts.SelectedItem.Tag
-        if ($tts -in @('piper', 'both') -and $voices.Count -eq 0) { throw 'Выберите хотя бы один голос Piper.' }
+        if ($tts -in @('piper', 'both') -and $voices.Count -eq 0) { throw (T 'Выберите хотя бы один голос Piper.') }
         if (Test-Path -LiteralPath $target) {
-            if (-not (Test-Path -LiteralPath $target -PathType Container)) { throw 'Путь LocalBox должен быть папкой.' }
+            if (-not (Test-Path -LiteralPath $target -PathType Container)) { throw (T 'Путь LocalBox должен быть папкой.') }
             if ((Get-ChildItem -LiteralPath $target -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $target 'server\server.js') -PathType Leaf)) {
-                throw 'Выберите пустую папку или существующую установку LocalBox.'
+                throw (T 'Выберите пустую папку или существующую установку LocalBox.')
             }
         }
         $game = if ($ui.Dodo.IsChecked) { $ui.GamePath.Text.Trim() } else { '' }
-        if ($game -and -not (Test-Path -LiteralPath $game -PathType Container)) { throw 'Папка Jackbox 10 не найдена.' }
+        if ($game -and -not (Test-Path -LiteralPath $game -PathType Container)) { throw (T 'Папка Jackbox 10 не найдена.') }
+        $tmp3 = if ($ui.Tmp3.IsChecked) { $ui.Tmp3Path.Text.Trim() } else { '' }
+        if ($ui.Tmp3.IsChecked) {
+            if (-not $tmp3) { throw (T 'Выберите папку TMP3 или снимите галочку патча.') }
+            foreach ($relative in @('TMP3.exe', 'TMP3\Binaries\Win64\TMP3-Win64-Shipping.exe')) {
+                if (-not (Test-Path -LiteralPath (Join-Path $tmp3 $relative) -PathType Leaf)) { throw (T 'В выбранной папке не найдена Trivia Murder Party 3.') }
+            }
+        }
         $cheat = if ($ui.Cheat.IsChecked) { $ui.CheatPath.Text.Trim() } else { '' }
-        if ($ui.Cheat.IsChecked -and -not $cheat) { throw 'Укажите папку с играми для читов или снимите галочку.' }
-        if ($cheat -and -not (Test-Path -LiteralPath $cheat -PathType Container)) { throw 'Папка с играми для читов не найдена.' }
+        if ($ui.Cheat.IsChecked -and -not $cheat) { throw (T 'Укажите папку с играми для читов или снимите галочку.') }
+        if ($cheat -and -not (Test-Path -LiteralPath $cheat -PathType Container)) { throw (T 'Папка с играми для читов не найдена.') }
         $script:running = $true
+        $ui.Language.IsEnabled = $false
         $ui.Settings.IsEnabled = $false
         $ui.Download.IsEnabled = $false
-        $ui.Download.Content = 'Скачиваем…'
+        $ui.Download.Content = (T 'Скачиваем…')
         $ui.Details.Visibility = 'Visible'
         $ui.Progress.Visibility = 'Visible'
-        if ($Latest) { Set-Status 'Проверяем последний Release и скачиваем LocalBox…' }
-        else { Set-Status 'Скачиваем и настраиваем LocalBox…' }
+        if ($Latest) { Set-Status (T 'Проверяем последний Release и скачиваем LocalBox…') }
+        else { Set-Status (T 'Скачиваем и настраиваем LocalBox…') }
         $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::Render)
         New-Item -ItemType Directory -Force -Path $work | Out-Null
         $options = Join-Path $work 'options.ini'
-        $lines = @('[setup]', "runtime=$runtime", "tts=$tts", ('voices=' + ($voices -join ',')), "game=$game", "cheat_content=$cheat", ('dodo=' + [int][bool]$ui.Dodo.IsChecked), ('russian=' + [int][bool]$ui.Russian.IsChecked))
+        $lines = @('[setup]', "language=$env:LOCALBOX_LANGUAGE", "runtime=$runtime", "tts=$tts", ('voices=' + ($voices -join ',')), "game=$game", "tmp3_game=$tmp3", "cheat_content=$cheat", ('dodo=' + [int][bool]$ui.Dodo.IsChecked), ('russian=' + [int][bool]$ui.Russian.IsChecked), ('trust=' + [int][bool]$ui.Trust.IsChecked))
         [IO.File]::WriteAllLines($options, $lines, [Text.Encoding]::Unicode)
         $script:stdout = Join-Path $work 'stdout.log'
         $script:stderr = Join-Path $work 'stderr.log'
@@ -316,11 +394,12 @@ function Start-Download {
         $script:downloadTarget = $target
     } catch {
         $script:running = $false
+        $ui.Language.IsEnabled = $true
         $ui.Settings.IsEnabled = $true
         $ui.Download.IsEnabled = $true
-        $ui.Download.Content = 'Скачать'
-        $ui.Progress.Visibility = 'Collapsed'
-        Set-Status ('Не получилось скачать: ' + $_.Exception.Message) 'Error'
+        $ui.Download.Content = (T 'Скачать')
+        $ui.Progress.Visibility = 'Hidden'
+        Set-Status ((T 'Не получилось скачать: ') + $_.Exception.Message) 'Error'
     }
 }
 
@@ -332,7 +411,7 @@ function Read-Progress {
     $completionError = ''
     if ($finished) {
         try { $code = Complete-LocalBoxProcess $script:process }
-        catch { $completionError = "`r`nНе удалось прочитать результат установки: " + $_.Exception.Message; $code = -1 }
+        catch { $completionError = ("`r`n" + (T 'Не удалось прочитать результат установки: ')) + $_.Exception.Message; $code = -1 }
         $script:process = $null
     }
     $text = ''
@@ -354,12 +433,12 @@ function Read-Progress {
     }
     if (-not $finished) { return }
     $script:running = $false
-    $ui.Progress.Visibility = 'Collapsed'
+    $ui.Progress.Visibility = 'Hidden'
     $ui.Download.IsEnabled = $true
     if ($code -eq 0) {
         $script:installed = $script:downloadTarget
-        Set-Status 'Готово. Можно открыть LocalBox.' 'Success'
-        $ui.Download.Content = 'Открыть LocalBox'
+        Set-Status (T 'Готово. Можно открыть LocalBox.') 'Success'
+        $ui.Download.Content = (T 'Открыть LocalBox')
         try {
             $shell = New-Object -ComObject WScript.Shell
             $menu = Join-Path ([Environment]::GetFolderPath('Programs')) 'LocalBox'
@@ -370,12 +449,13 @@ function Read-Progress {
                 $shortcut.WorkingDirectory = $script:installed
                 $shortcut.Save()
             }
-        } catch { $ui.Log.AppendText("`r`nНе удалось добавить ярлык: " + $_.Exception.Message) }
+        } catch { $ui.Log.AppendText(("`r`n" + (T 'Не удалось добавить ярлык: ')) + $_.Exception.Message) }
     } else {
         $ui.Settings.IsEnabled = $true
-        $ui.Download.Content = 'Скачать'
-        Set-Status ("Установка не завершена (код $code). Подробности — в журнале.") 'Error'
-        $ui.Details.IsExpanded = $true
+        $ui.Language.IsEnabled = $true
+        $ui.Download.Content = (T 'Скачать')
+        Set-Status ((T 'Установка не завершена (код {0}). Подробности — в журнале.' -Values @(($code)))) 'Error'
+        Show-SetupLog
     }
 }
 
@@ -389,6 +469,9 @@ $ui.AppPath.Add_TextChanged({
 })
 $ui.AppBrowse.Add_Click({ Browse-Folder $ui.AppPath })
 $ui.RuntimeBrowse.Add_Click({ Browse-Folder $ui.RuntimePath })
+$ui.Tmp3Browse.Add_Click({ Browse-Folder $ui.Tmp3Path })
+$ui.Tmp3.Add_Checked({ Update-Options })
+$ui.Tmp3.Add_Unchecked({ Update-Options })
 $ui.GameBrowse.Add_Click({ Browse-Folder $ui.GamePath })
 $ui.CheatBrowse.Add_Click({ Browse-Folder $ui.CheatPath })
 $ui.Cheat.Add_Checked({ Update-Options })
@@ -399,7 +482,7 @@ $ui.Dodo.Add_Unchecked({ Update-Options })
 $ui.Download.Add_Click({ Start-Download })
 $window.Add_Closing({
     param($sender, $eventArgs)
-    if ($script:running) { $eventArgs.Cancel = $true; Set-Status 'Скачивание ещё идёт. Дождитесь окончания.' }
+    if ($script:running) { $eventArgs.Cancel = $true; Set-Status (T 'Скачивание ещё идёт. Дождитесь окончания.') }
 })
 $themeTimer = New-Object Windows.Threading.DispatcherTimer
 $themeTimer.Interval = [TimeSpan]::FromSeconds(2)
@@ -408,17 +491,23 @@ $progressTimer = New-Object Windows.Threading.DispatcherTimer
 $progressTimer.Interval = [TimeSpan]::FromMilliseconds(300)
 $progressTimer.Add_Tick({
     try { Read-Progress }
-    catch { $ui.Log.AppendText("`r`n" + $_.Exception.Message); $ui.Details.IsExpanded = $true }
+    catch { $ui.Log.AppendText("`r`n" + $_.Exception.Message); Show-SetupLog }
 })
 $window.Add_SourceInitialized({ $script:themeKey = ''; Update-Theme; Fit-SetupScreen })
 $window.Add_LocationChanged({ Fit-SetupScreen })
 Load-GamePaths
+Register-LocalizedControls $window
+$ui.Language.SelectedIndex = if ($env:LOCALBOX_LANGUAGE -eq 'ru') { 0 } else { 1 }
+$ui.Language.Add_SelectionChanged({ Apply-SetupLanguage })
+Apply-SetupLanguage
 Update-Options
 Update-Theme
 $themeTimer.Start()
 $progressTimer.Start()
 try { [void]$window.ShowDialog() }
 finally {
+    $script:closing = $true
+    $logWindow.Close()
     $themeTimer.Stop()
     $progressTimer.Stop()
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }

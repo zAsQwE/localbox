@@ -1,6 +1,6 @@
 "use strict";
 //
-// LocalBox server — Blobcast (старый протокол, socket.io 0.9) поверх той же Room/entity-store.
+// LocalBox — Blobcast (старый протокол, socket.io 0.9) поверх той же Room/entity-store.
 // Транспорт socket.io: '1::' connect, '2:::' heartbeat, '5:::{json}' событие, '0::' disconnect.
 // Собственная реализация LocalBox.
 //

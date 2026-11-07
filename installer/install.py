@@ -15,6 +15,7 @@ from client_download import install_client as install_web_client
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "launcher"))
+from setup.i18n import tr
 from setup.dodo import songs_directory, import_dodo
 from setup.npm import invocation as npm_invocation
 PIPER_VOICES = ("ru_RU-denis-medium", "ru_RU-dmitri-medium", "ru_RU-irina-medium", "ru_RU-ruslan-medium")
@@ -32,11 +33,12 @@ def payload_files(source=SOURCE):
                 continue
             if relative.parts[:3] == ("server", "tts", "piper"):
                 continue
-            if any(part in ("test", "tests") for part in relative.parts) or path.name.startswith("test_") or path.name == "testing.md":
+            if any(part in ("test", "tests") for part in relative.parts) or path.name.startswith("test_") or path.name in ("testing.md", "testing.en.md"):
                 continue
             if path.name in ("config.json", "localbox-settings.json", "install-paths.json", "setup-options.ini"):
                 continue
-            if path.is_file() and not path.is_symlink() and path.suffix in (".py", ".js", ".json", ".md", ".txt", ".ps1", ".sh", ".nsi"):
+            trusted_helper = relative.as_posix() == "launcher/setup/pki/windows-root-x64.exe"
+            if path.is_file() and not path.is_symlink() and (trusted_helper or path.suffix in (".py", ".js", ".json", ".md", ".txt", ".ps1", ".sh", ".nsi", ".c")):
                 yield relative
 
 
@@ -45,7 +47,7 @@ def read_json(path):
         return {}
     value = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(value, dict):
-        raise ValueError(f"Ожидался объект JSON: {path}")
+        raise ValueError(tr('Ожидался объект JSON: {0}', path))
     return value
 
 
@@ -58,21 +60,24 @@ def write_json(path, value):
 
 def deploy(source, target, log=print):
     source, target = Path(source).resolve(), Path(target).expanduser().resolve()
-    if target == source:
-        return
-    if target.exists() and any(target.iterdir()) and not (target / "server" / "server.js").is_file():
-        raise ValueError("Выберите пустую папку или существующую установку LocalBox.")
+    if target != source and target.exists() and any(target.iterdir()) and not (target / "server" / "server.js").is_file():
+        raise ValueError(tr('Выберите пустую папку или существующую установку LocalBox.'))
     target.mkdir(parents=True, exist_ok=True)
-    for relative in payload_files(source):
+    for relative in (() if target == source else payload_files(source)):
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source / relative, destination)
-    for obsolete in ("launcher/setup/porthole.py", "launcher/test_porthole.py", "docs/porthole.md"):
+    for obsolete in ("launcher/setup/porthole.py", "launcher/test_porthole.py", "docs/porthole.md",
+                     "launcher/setup/game_launch.py", "launcher/setup/start-game.ps1", "launcher/setup/start-game.sh",
+                     "tools/export-game-connection.py", "launcher/requirements.txt",
+                     "launcher/setup/pack12.py", "tools/connect-pack12.py", "tools/connect-pack12.ps1",
+                     "tools/patch-pack12-tls.py", "tools/patch-pack12-tls.ps1",
+                     "docs/party-pack-12.md", "docs/party-pack-12.en.md"):
         (target / obsolete).unlink(missing_ok=True)
     for name in ("start-server.sh", "setup.sh", "installer/linux-deps.sh", "installer/askpass.sh"):
         if (target / name).exists():
             (target / name).chmod(0o755)
-    log(f"Файлы LocalBox: {target}")
+    log(tr('Файлы LocalBox: {0}', target))
 
 
 
@@ -87,7 +92,7 @@ def run(command, log=print, cwd=None, env=None, input_text=None):
         if result.stderr:
             log(result.stderr)
         if result.returncode:
-            raise RuntimeError(f"Команда завершилась с ошибкой {result.returncode}: {command[0]}")
+            raise RuntimeError(tr('Команда завершилась с ошибкой {0}: {1}', result.returncode, command[0]))
         return
     process = subprocess.Popen([str(c) for c in command], cwd=cwd, env=env, shell=shell,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -95,19 +100,19 @@ def run(command, log=print, cwd=None, env=None, input_text=None):
     for line in process.stdout:
         log(line.rstrip())
     if process.wait() != 0:
-        raise RuntimeError(f"Команда завершилась с ошибкой {process.returncode}: {command[0]}")
+        raise RuntimeError(tr('Команда завершилась с ошибкой {0}: {1}', process.returncode, command[0]))
 
 
 def download(url, target, log=print):
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    log("Загрузка: " + url)
+    log(tr('Загрузка: ') + url)
     partial = target.with_suffix(target.suffix + ".part")
     try:
         with urllib.request.urlopen(url, timeout=60) as response, partial.open("wb") as output:
             shutil.copyfileobj(response, output)
         if not partial.stat().st_size:
-            raise RuntimeError("Скачан пустой файл: " + url)
+            raise RuntimeError(tr('Скачан пустой файл: ') + url)
         partial.replace(target)
     finally:
         partial.unlink(missing_ok=True)
@@ -118,7 +123,7 @@ def tts_install(target, runtime_dir, tts, voices, python=sys.executable, log=pri
         return {"tts_engine": "silent" if tts == "none" else "espeak", "tts_voice": "" if tts == "none" else "ru"}
     invalid = set(voices) - set(PIPER_VOICES)
     if invalid or (tts in ("piper", "both") and not voices):
-        raise ValueError("Выберите хотя бы один поддерживаемый голос Piper.")
+        raise ValueError(tr('Выберите хотя бы один поддерживаемый голос Piper.'))
     venv = runtime_dir / "tts"
     py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
@@ -142,34 +147,45 @@ def tts_install(target, runtime_dir, tts, voices, python=sys.executable, log=pri
         if tts in ("silero", "both"):
             run([str(py), str(folder / "silero_worker.py"), "--sample", "eugene", str(sample)], log, env=env)
             if not sample.exists() or sample.stat().st_size < 100:
-                raise RuntimeError("Silero не создал тестовый звук.")
+                raise RuntimeError(tr('Silero не создал тестовый звук.'))
         if tts in ("piper", "both"):
             for voice in voices:
                 sample.unlink(missing_ok=True)
                 run([str(py), "-m", "piper", "-m", voice, "--data-dir", str(folder / "piper"), "-f", str(sample)],
                     log, env=env, input_text="Привет, это LocalBox.\n")
                 if not sample.exists() or sample.stat().st_size < 100:
-                    raise RuntimeError(f"Piper {voice} не создал тестовый звук.")
+                    raise RuntimeError(tr('Piper {0} не создал тестовый звук.', voice))
     return {"tts_engine": "piper" if tts in ("piper", "both") else "silero",
             "tts_voice": voices[0] if tts in ("piper", "both") else "eugene", "tts_python": str(py)}
 
 
 def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=False,
-            russian=False, source=SOURCE, system_deps=True, log=print, cheat_content=None):
+            russian=False, source=SOURCE, system_deps=True, log=print, cheat_content=None, tmp3_game=None, language=None,
+            trust=False):
+    from setup import i18n
+    selected_language = i18n.set_language(language or i18n.language())
+    russian = bool(russian and selected_language == "ru")
     target = Path(target).expanduser().resolve()
     runtime_dir = Path(runtime_dir).expanduser().resolve() if runtime_dir else target / "runtime"
     voices = list(voices if voices is not None else [PIPER_VOICES[0]])
     if tts not in ("none", "piper", "silero", "both", "espeak"):
-        raise ValueError("Неизвестный движок TTS.")
+        raise ValueError(tr('Неизвестный движок TTS.'))
     if tts in ("piper", "both") and (not voices or set(voices) - set(PIPER_VOICES)):
-        raise ValueError("Выберите хотя бы один поддерживаемый голос Piper.")
+        raise ValueError(tr('Выберите хотя бы один поддерживаемый голос Piper.'))
     if game:
         songs_directory(game)  # Проверяем путь до загрузки зависимостей.
         dodo = True
     if cheat_content:
         cheat_content = str(Path(cheat_content).expanduser().resolve())
         if not Path(cheat_content).is_dir():
-            raise ValueError("Папка с играми для читов не найдена.")
+            raise ValueError(tr('Папка с играми для читов не найдена.'))
+    if tmp3_game:
+        from setup.tmp3 import game_root, game_running, inspect
+        tmp3_game = str(game_root(tmp3_game))
+        if game_running():
+            raise ValueError(tr('Закройте Trivia Murder Party 3 перед установкой патча.'))
+        if not inspect(tmp3_game)["supported"]:
+            raise ValueError(tr('Эта сборка Trivia Murder Party 3 пока не поддерживается патчем.'))
     russian_release = russian_release_info() if russian else None
     deploy(source, target, log)
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -178,7 +194,7 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     write_json(target / "launcher" / "install-paths.json", manifest)
     if system_deps:
         if os.name == "nt":
-            raise RuntimeError("Windows-зависимости устанавливает windows-bootstrap.ps1 до запуска Python.")
+            raise RuntimeError(tr('Windows-зависимости устанавливает windows-bootstrap.ps1 до запуска Python.'))
         run(["bash", str(target / "installer" / "linux-deps.sh"), "--full", tts], log,
             env={**os.environ, "LOCALBOX_SOURCE": str(target), "LOCALBOX_RUNTIME": str(runtime_dir)})
         manifest = read_json(target / "launcher" / "install-paths.json")
@@ -193,7 +209,7 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm", path=env["PATH"])
     git = shutil.which("git", path=env["PATH"])
     if (not npm and not manifest.get('npm_cli')) or not git:
-        raise RuntimeError("Не найдены npm или git после установки зависимостей.")
+        raise RuntimeError(tr('Не найдены npm или git после установки зависимостей.'))
     for name in ("node", "npm", "git", "ffmpeg", "openssl", "mkcert"):
         found = shutil.which("npm.cmd" if name == "npm" and os.name == "nt" else name, path=env["PATH"])
         if found:
@@ -209,6 +225,7 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     if game:
         import_dodo(game, target, log)
     options = read_json(target / "launcher" / "localbox-settings.json")
+    options["language"] = selected_language
     options.update(tts_install(target, runtime_dir, tts, voices, log=log))
     options.update(dodo_render=bool(dodo))
     if cheat_content is not None:
@@ -216,6 +233,14 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
     if game:
         options["jackbox10_path"] = str(Path(game).expanduser().resolve())
     write_json(target / "launcher" / "localbox-settings.json", options)
+    if trust and os.name == "nt":  # Linux: nothing is installed, the Steam line carries -cafile
+        # The user agreed in setup: one elevation prompt (Linux) or one Windows dialog.
+        log(tr('Делаю сертификат LocalBox доверенным для игр Jackbox…'))
+        run([sys.executable, str(target / "tools" / "trust-games.py")], log, cwd=str(target), env=env)
+    if tmp3_game:
+        log(tr('Устанавливаю патч Trivia Murder Party 3…'))
+        run([sys.executable, str(target / "tools" / "patch-tmp3.py"), "--game", tmp3_game],
+            log, cwd=str(target), env=env)
     if os.name != "nt":
         applications = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "applications"
         applications.mkdir(parents=True, exist_ok=True)
@@ -223,27 +248,31 @@ def install(target, runtime_dir=None, tts="piper", voices=None, game=None, dodo=
         executable = str(target / "start-server.sh").replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`").replace("$", "\\$").replace("%", "%%")
         (applications / "localbox.desktop").write_text(
             f'[Desktop Entry]\nType=Application\nName=LocalBox\nExec="{executable}"\nTerminal=true\nCategories=Game;\n', encoding="utf-8")
-    log(f"Готово. Запуск: {target / ('start-server.bat' if os.name == 'nt' else 'start-server.sh')}")
+    log(tr('Готово. Запуск: {0}', target / ('start-server.bat' if os.name == 'nt' else 'start-server.sh')))
     return target
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Установщик LocalBox")
+    parser = argparse.ArgumentParser(description=tr('Установщик LocalBox'))
     parser.add_argument("--target", required=True)
+    parser.add_argument("--language", choices=("ru", "en"))
     parser.add_argument("--runtime")
     parser.add_argument("--tts", choices=("none", "piper", "silero", "both", "espeak"), default="piper")
     parser.add_argument("--voices", default=PIPER_VOICES[0])
     parser.add_argument("--game")
-    parser.add_argument("--cheat-content", help="Папка со всеми играми Jackbox; пустое значение — поиск в Steam")
+    parser.add_argument("--tmp3-game", help=tr('Папка TMP3; патч применяется только при указании этого параметра'))
+    parser.add_argument("--cheat-content", help=tr('Папка со всеми играми Jackbox; пустое значение — поиск в Steam'))
     parser.add_argument("--dodo", action="store_true")
+    parser.add_argument("--trust", action="store_true", help=tr('Сделать сертификат LocalBox доверенным для игр Jackbox'))
     parser.add_argument("--ru", action="store_true")
     parser.add_argument("--skip-system-deps", action="store_true")
     args = parser.parse_args()
     try:
         install(args.target, args.runtime, args.tts, [v for v in args.voices.split(",") if v], args.game,
-                args.dodo, args.ru, system_deps=not args.skip_system_deps, cheat_content=args.cheat_content)
+                args.dodo, args.ru, system_deps=not args.skip_system_deps, cheat_content=args.cheat_content, tmp3_game=args.tmp3_game, language=args.language,
+                trust=args.trust)
     except (OSError, ValueError, RuntimeError) as error:
-        print(f"Установка не завершена: {error}", file=sys.stderr)
+        print(tr('Установка не завершена: {0}', error), file=sys.stderr)
         return 1
     return 0
 

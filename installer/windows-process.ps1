@@ -1,4 +1,5 @@
 ﻿# PowerShell 5.1: keep the real Process handle and copy UTF-8 logs without a native pipeline.
+. (Join-Path $PSScriptRoot 'windows-i18n.ps1')
 function ConvertTo-LocalBoxArgument([AllowEmptyString()][string]$Value) {
     if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
     $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
@@ -26,7 +27,7 @@ function Start-LocalBoxProcess {
                     [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite, 1, $true)
             }
         }
-        if (-not $process.Start()) { throw "Не удалось запустить $File" }
+        if (-not $process.Start()) { throw (T 'Не удалось запустить {0}' -Values @($File)) }
         # Start-Process -PassThru with redirection can lose ExitCode on Windows.
         # Process.Start plus retaining the handle also covers an immediately exiting child.
         [void]$process.Handle
@@ -47,7 +48,7 @@ function Complete-LocalBoxProcess($Worker) {
         $Worker.Process.WaitForExit()
         foreach ($copy in $Worker.Copies) { [void]$copy.GetAwaiter().GetResult() }
         $code = $Worker.Process.ExitCode
-        if ($null -eq $code) { throw 'Не удалось получить код завершения установки.' }
+        if ($null -eq $code) { throw (T 'Не удалось получить код завершения установки.') }
         return [int]$code
     } finally {
         foreach ($stream in $Worker.Streams) { $stream.Dispose() }

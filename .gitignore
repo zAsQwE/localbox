@@ -10,6 +10,11 @@ dist/
 certs/
 *.pem
 *.key
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -22,6 +27,8 @@ Thumbs.db
 
 # Бэкапы патчей игр
 *.localbox-backup
+*.localbox-original
+.localbox-pack12-*
 
 # Кэш/временное
 cache/
@@ -39,14 +46,10 @@ client-ru/
 client-fun/
 runtime/
 
-# Сборки PyInstaller — НЕ коммитим (быстро устаревают и ломают пути).
-# Собирай exe заново (launcher/build-exe.sh) или через GitHub Actions/Releases.
+# Локальные сборки Python-лаунчера
 launcher/build/
 launcher/dist/
 *.spec
-
-# Android-подпроект временно скрыт (в разработке, экспериментальный VPN)
-/android/
 
 # Ассеты рендера Додо Ре Ми (инструменты/песни, большие, не наши)
 server/render/
@@ -55,7 +58,9 @@ server/render/
 /server/test/
 /launcher/test_*.py
 /installer/test_*.py
+/tools/test_*.py
 /docs/testing.md
+/docs/testing.en.md
 
 # Журналы и временные параметры установки
 *.log

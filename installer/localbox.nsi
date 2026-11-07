@@ -22,7 +22,7 @@ Var LatestSwitch
 ; NSIS only unpacks the bundle. The single-window UI works before Python is installed.
 Section "LocalBox"
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "Для LocalBox нужна 64-битная Windows 10 или 11."
+    MessageBox MB_ICONSTOP "LocalBox requires 64-bit Windows 10/11.$\r$\nНужна 64-битная Windows 10/11."
     SetErrorLevel 1
     Quit
   ${EndIf}

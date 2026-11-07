@@ -33,8 +33,12 @@ DEFAULT_SPK = os.environ.get("LOCALBOX_TTS_VOICE") or "eugene"
 SPEAKERS = ["aidar", "baya", "kseniya", "xenia", "eugene", "random"]
 
 try:
-    torch.set_num_threads(max(1, os.cpu_count() or 1))
+    cores = os.cpu_count() or 1
+    default_threads = min(2, max(1, cores - 1))
+    torch.set_num_threads(max(1, min(4, cores, int(os.environ.get("LOCALBOX_TTS_THREADS", str(default_threads))))))
     if not os.path.isfile(MODEL):
+        if os.environ.get("LOCALBOX_TTS_ALLOW_DOWNLOAD") == "0":
+            raise FileNotFoundError("Модель Silero не установлена; предзагрузка не скачивает модели")
         emit({"info": "скачиваю модель Silero (~60 МБ, один раз, нужен интернет)…"})
         torch.hub.download_url_to_file(URL, MODEL)
     model = torch.package.PackageImporter(MODEL).load_pickle("tts_models", "model")

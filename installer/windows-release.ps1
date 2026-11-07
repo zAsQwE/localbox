@@ -1,4 +1,5 @@
 ﻿# PowerShell 5.1: download and verify release payloads without requiring Python.
+. (Join-Path $PSScriptRoot 'windows-i18n.ps1')
 $script:LocalBoxRepository = 'zAsQwE/localbox'
 $script:LocalBoxReleaseBase = "https://github.com/$script:LocalBoxRepository/releases"
 $script:LocalBoxMaxReleaseSize = 100MB
@@ -12,20 +13,20 @@ function Test-PayloadPath([string]$Name) {
             $part -match '[<>:"|?*]' -or $part.EndsWith('.') -or $part.EndsWith(' ') -or
             $part -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') { return $false }
     }
-    if ($parts[-1] -in @('config.json','localbox-settings.json','install-paths.json','update-state.json','setup-options.ini','testing.md')) { return $false }
+    if ($parts[-1] -in @('config.json','localbox-settings.json','install-paths.json','update-state.json','setup-options.ini','testing.md','testing.en.md')) { return $false }
     if (@('LICENSE','README.md','start-server.sh','start-server.bat','setup.sh','install.bat','version.json') -ccontains $Name) { return $true }
     return $parts[0] -cin @('launcher','server','installer','tools','docs') -and [IO.Path]::GetExtension($Name) -cin @('.py','.js','.json','.md','.txt','.ps1','.sh','.nsi')
 }
 
 function Get-ReleaseVersion([string]$Version) {
-    if ($Version -notmatch '^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$') { throw "Неверный номер версии Release: $Version" }
+    if ($Version -notmatch '^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$') { throw (T 'Неверный номер версии Release: {0}' -Values @(($Version))) }
     return (@([int]$matches[1], [int]$matches[2], [int]$matches[3]) -join '.')
 }
 
 function Get-ReleaseAssetUrl($Asset) {
     $url = [string]$Asset.browser_download_url
     if (-not $url.StartsWith($script:LocalBoxReleaseBase + '/download/', [StringComparison]::Ordinal)) {
-        throw 'Адрес файла не принадлежит Releases LocalBox.'
+        throw (T 'Адрес файла не принадлежит Releases LocalBox.')
     }
     return $url
 }
@@ -48,10 +49,10 @@ function Save-ReleaseArchive([string]$Url, [string]$File) {
             $size = 0L
             while (($count = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
                 $size += $count
-                if ($size -gt $script:LocalBoxMaxReleaseSize) { throw 'Архив Release слишком большой.' }
+                if ($size -gt $script:LocalBoxMaxReleaseSize) { throw (T 'Архив Release слишком большой.') }
                 $output.Write($buffer, 0, $count)
             }
-            if ($size -eq 0) { throw 'Скачан пустой архив Release.' }
+            if ($size -eq 0) { throw (T 'Скачан пустой архив Release.') }
         } finally { $output.Dispose(); $input.Dispose() }
     } finally { $response.Dispose() }
 }
@@ -67,38 +68,38 @@ function Expand-VerifiedRelease([string]$Archive, [string]$Payload, [string]$Ver
     $package = [IO.Compression.ZipFile]::OpenRead($Archive)
     try {
         $entries = @($package.Entries)
-        if ($entries.Count -gt 5000) { throw 'Слишком много файлов в Release.' }
+        if ($entries.Count -gt 5000) { throw (T 'Слишком много файлов в Release.') }
         $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $total = 0L
         foreach ($entry in $entries) {
             $total += $entry.Length
             $symlink = (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000
             if (-not (Test-PayloadPath $entry.FullName) -or $symlink -or -not $names.Add($entry.FullName)) {
-                throw "Недопустимый или повторяющийся путь Release: $($entry.FullName)"
+                throw (T 'Недопустимый или повторяющийся путь Release: {0}' -Values @(($($entry.FullName))))
             }
         }
-        if ($total -gt $script:LocalBoxMaxReleaseSize) { throw 'Распакованный Release слишком большой.' }
+        if ($total -gt $script:LocalBoxMaxReleaseSize) { throw (T 'Распакованный Release слишком большой.') }
         $manifestEntry = $package.GetEntry('installer/payload-sha256.json')
-        if (-not $manifestEntry) { throw 'В Release нет манифеста файлов.' }
+        if (-not $manifestEntry) { throw (T 'В Release нет манифеста файлов.') }
         $manifest = Read-ZipText $manifestEntry | ConvertFrom-Json
         $properties = @($manifest.PSObject.Properties)
-        if ($properties.Count + 1 -ne $entries.Count) { throw 'Файлы Release не совпадают с манифестом.' }
+        if ($properties.Count + 1 -ne $entries.Count) { throw (T 'Файлы Release не совпадают с манифестом.') }
         foreach ($required in @('server/server.js','server/package.json','launcher/localbox_launcher.py','version.json')) {
-            if ($properties.Name -cnotcontains $required) { throw "Неполный Release: $required" }
+            if ($properties.Name -cnotcontains $required) { throw (T 'Неполный Release: {0}' -Values @(($required))) }
         }
         foreach ($property in $properties) {
             if ($property.Name -eq 'installer/payload-sha256.json' -or -not (Test-PayloadPath $property.Name) -or
-                $property.Value -cnotmatch '^[a-f0-9]{64}$') { throw 'Некорректный манифест Release.' }
+                $property.Value -cnotmatch '^[a-f0-9]{64}$') { throw (T 'Некорректный манифест Release.') }
             $entry = $package.GetEntry($property.Name)
-            if (-not $entry) { throw "Нет файла Release: $($property.Name)" }
+            if (-not $entry) { throw (T 'Нет файла Release: {0}' -Values @(($($property.Name)))) }
             $stream = $entry.Open()
             $sha = [Security.Cryptography.SHA256]::Create()
             try { $actual = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
             finally { $sha.Dispose(); $stream.Dispose() }
-            if ($actual -cne $property.Value) { throw "Повреждён файл Release: $($property.Name)" }
+            if ($actual -cne $property.Value) { throw (T 'Повреждён файл Release: {0}' -Values @(($($property.Name)))) }
         }
         $actualVersion = (Read-ZipText ($package.GetEntry('version.json')) | ConvertFrom-Json).version
-        if ((Get-ReleaseVersion $actualVersion) -ne (Get-ReleaseVersion $Version)) { throw 'Версия архива не совпадает с тегом Release.' }
+        if ((Get-ReleaseVersion $actualVersion) -ne (Get-ReleaseVersion $Version)) { throw (T 'Версия архива не совпадает с тегом Release.') }
         New-Item -ItemType Directory -Force -Path $Payload | Out-Null
         foreach ($entry in $entries) {
             $file = Join-Path $Payload $entry.FullName
@@ -113,40 +114,40 @@ function Expand-VerifiedRelease([string]$Archive, [string]$Payload, [string]$Ver
 
 function Get-LatestPayload([string]$Work) {
     if ((Test-Path -LiteralPath $Work) -and (Get-ChildItem -LiteralPath $Work -Force | Select-Object -First 1)) {
-        throw 'Папка загрузки Release должна быть пустой.'
+        throw (T 'Папка загрузки Release должна быть пустой.')
     }
-    Write-Host 'Проверяю последний стабильный Release LocalBox…'
+    Write-Host (T 'Проверяю последний стабильный Release LocalBox…')
     try { $release = Read-ReleaseText "https://api.github.com/repos/$script:LocalBoxRepository/releases/latest" }
     catch {
-        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { throw 'Нет опубликованного стабильного Release LocalBox.' }
+        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { throw (T 'Нет опубликованного стабильного Release LocalBox.') }
         throw
     }
-    if (-not $release.tag_name -or $release.draft -or $release.prerelease) { throw 'Нет опубликованного стабильного Release LocalBox.' }
+    if (-not $release.tag_name -or $release.draft -or $release.prerelease) { throw (T 'Нет опубликованного стабильного Release LocalBox.') }
     [void](Get-ReleaseVersion $release.tag_name)
     $asset = @($release.assets | Where-Object { $_.name -ceq 'localbox-update.zip' })
-    if ($asset.Count -ne 1) { throw "В выпуске $($release.tag_name) нет localbox-update.zip. Автору нужно прикрепить архив к Release." }
+    if ($asset.Count -ne 1) { throw (T 'В выпуске {0} нет localbox-update.zip. Автору нужно прикрепить архив к Release.' -Values @(($($release.tag_name)))) }
     $asset = $asset[0]
     $expected = ''
     if ($asset.digest -match '^sha256:([a-fA-F0-9]{64})$') { $expected = $matches[1] }
     else {
         $checksums = @($release.assets | Where-Object { $_.name -ceq 'SHA256SUMS' })
-        if ($checksums.Count -ne 1) { throw 'В Release нет SHA-256 для проверки архива.' }
+        if ($checksums.Count -ne 1) { throw (T 'В Release нет SHA-256 для проверки архива.') }
         $text = [string](Read-ReleaseText (Get-ReleaseAssetUrl $checksums[0]))
-        if ($text.Length -gt 65536) { throw 'Слишком большой список SHA256SUMS.' }
+        if ($text.Length -gt 65536) { throw (T 'Слишком большой список SHA256SUMS.') }
         $found = [regex]::Matches($text, '(?m)^([a-fA-F0-9]{64})\s+\*?localbox-update\.zip\s*$')
-        if ($found.Count -ne 1) { throw 'В SHA256SUMS отсутствует однозначная сумма архива.' }
+        if ($found.Count -ne 1) { throw (T 'В SHA256SUMS отсутствует однозначная сумма архива.') }
         $expected = $found[0].Groups[1].Value
     }
     New-Item -ItemType Directory -Force -Path $Work | Out-Null
     $archive = Join-Path $Work 'localbox-update.zip'
     $payload = Join-Path $Work 'payload'
     try {
-        Write-Host "Скачиваю Release $($release.tag_name)…"
+        Write-Host (T 'Скачиваю Release {0}…' -Values @(($($release.tag_name))))
         Save-ReleaseArchive (Get-ReleaseAssetUrl $asset) $archive
-        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) { throw 'SHA-256 Release не совпала. Папка установки не изменена.' }
+        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) { throw (T 'SHA-256 Release не совпала. Папка установки не изменена.') }
         Expand-VerifiedRelease $archive $payload $release.tag_name
         $env:LOCALBOX_RELEASE_TAG = [string]$release.tag_name
-        Write-Host "Устанавливаю Release $($release.tag_name)."
+        Write-Host (T 'Устанавливаю Release {0}.' -Values @(($($release.tag_name))))
         return $payload
     } catch {
         if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Recurse -Force }
@@ -158,18 +159,18 @@ function Get-LatestPayload([string]$Work) {
 
 function Copy-VerifiedPayload([string]$Source, [string]$Destination) {
     $manifestPath = Join-Path $Source 'installer/payload-sha256.json'
-    if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Не найден манифест установки. Запустите собранный setup.exe.' }
+    if (-not (Test-Path -LiteralPath $manifestPath)) { throw (T 'Не найден манифест установки. Запустите собранный setup.exe.') }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($property in $manifest.PSObject.Properties) {
-        if (-not (Test-PayloadPath $property.Name)) { throw "Недопустимый файл установки: $($property.Name)" }
+        if (-not (Test-PayloadPath $property.Name)) { throw (T 'Недопустимый файл установки: {0}' -Values @(($($property.Name)))) }
         $file = Join-Path $Source $property.Name
-        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $property.Value) { throw "Не совпала контрольная сумма: $($property.Name)" }
+        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $property.Value) { throw (T 'Не совпала контрольная сумма: {0}' -Values @(($($property.Name)))) }
         $to = Join-Path $Destination $property.Name
         $current = $to
         while ($current -and $current.Length -gt $Destination.Length) {
             if (Test-Path -LiteralPath $current) {
                 $item = Get-Item -LiteralPath $current -Force
-                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Путь установки содержит ссылку: $current" }
+                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw (T 'Путь установки содержит ссылку: {0}' -Values @(($current))) }
             }
             $current = Split-Path $current -Parent
         }

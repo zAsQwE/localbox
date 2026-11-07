@@ -1,13 +1,20 @@
 ﻿# PowerShell 5.1; пути читаем как данные, в том числе при отдельной папке runtime.
+. (Join-Path $PSScriptRoot 'windows-i18n.ps1')
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 try { [Console]::InputEncoding = $OutputEncoding } catch { }
 try { [Console]::OutputEncoding = $OutputEncoding } catch { }
+Use-LocalBoxConsoleFont
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 Remove-Item Env:PYTHONLEGACYWINDOWSSTDIO -ErrorAction SilentlyContinue
 . (Join-Path $PSScriptRoot 'windows-process.ps1')
 $root = Split-Path $PSScriptRoot -Parent
+$settingsFile = Join-Path $root 'launcher/localbox-settings.json'
+if (Test-Path -LiteralPath $settingsFile -PathType Leaf) {
+    try { Set-LocalBoxLanguage (Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json).language }
+    catch { }
+}
 $manifest = Join-Path $root 'launcher\install-paths.json'
 $python = $null
 if (Test-Path -LiteralPath $manifest) {
@@ -33,6 +40,6 @@ if (-not $python) {
         }
     }
 }
-if (-not $python) { Write-Host 'Python не найден. Запустите setup.exe или install.bat.'; exit 1 }
+if (-not $python) { Write-Host (T 'Python не найден. Запустите setup.exe или install.bat.'); exit 1 }
 $worker = Start-LocalBoxProcess -File $python -Arguments (@((Join-Path $root 'launcher\start.py')) + @($args))
 exit (Complete-LocalBoxProcess $worker)

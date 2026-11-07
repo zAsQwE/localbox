@@ -12,6 +12,17 @@ function connectedPlayers(room) {
     );
 }
 
+// Players join over plain HTTP: phones and browsers need no certificate, and the
+// served client switches itself to ws://. The server's own HTTPS ports map to
+// their HTTP twins; an unknown port (e.g. a forwarded tunnel) keeps HTTPS.
+const HTTP_TWIN = { "": "", "80": "", "443": "", "38202": ":38202", "38203": ":38202" };
+function joinOrigin(authority) {
+    const match = String(authority || "localhost").match(/^(\[[^\]]*\]|[^:]*)(?::(\d+))?$/);
+    if (!match) return "https://" + authority;
+    const port = match[2] || "";
+    return Object.hasOwn(HTTP_TWIN, port) ? "http://" + match[1] + HTTP_TWIN[port] : "https://" + authority;
+}
+
 function roomStatus(room, serverUrl) {
     if (!room || room.closed) return null;
     const players = connectedPlayers(room);
@@ -24,7 +35,7 @@ function roomStatus(room, serverUrl) {
         minPlayers: room.minPlayers,
         full: players.length >= room.maxPlayers,
         qrVisible: !room.locked && !room.gameStarted,
-        joinUrl: `https://${serverUrl}/?code=${encodeURIComponent(code)}&ref=qr`,
+        joinUrl: `${joinOrigin(serverUrl)}/?code=${encodeURIComponent(code)}&ref=qr`,
     };
 }
 

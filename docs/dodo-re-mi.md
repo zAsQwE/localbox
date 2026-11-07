@@ -1,3 +1,5 @@
+[Русский](dodo-re-mi.md) · [English](dodo-re-mi.en.md) · [Главная](../README.md)
+
 # Додо Ре Ми (nopus-opus) — офлайн-рендер выступления
 
 Игра **Dodo Re Mi** (The Jackbox Party Pack 10) после записи нот отправляет данные

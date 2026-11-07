@@ -1,5 +1,7 @@
 """Password dialog fallback for sudo -A; stdout is consumed only by sudo."""
 
+from i18n import tr
+
 import sys
 
 
@@ -11,7 +13,7 @@ def main():
         root.withdraw()
         try:
             password = simpledialog.askstring('LocalBox',
-                'Пароль администратора для установки системных пакетов:', show='*', parent=root)
+                tr('Пароль администратора для установки системных пакетов:'), show='*', parent=root)
         finally:
             root.destroy()
         if password is None:
@@ -19,7 +21,7 @@ def main():
         sys.stdout.write(password + '\n')
         return 0
     except Exception:
-        print('Не удалось открыть запрос пароля. Запустите setup из терминала.', file=sys.stderr)
+        print(tr('Не удалось открыть запрос пароля. Запустите setup из терминала.'), file=sys.stderr)
         return 1
 
 

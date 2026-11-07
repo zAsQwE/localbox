@@ -1,0 +1,5 @@
+<resources>
+ <item name="playerWeb" type="id"/>
+ <item name="installedSearch" type="id"/>
+ <item name="installedList" type="id"/>
+</resources>

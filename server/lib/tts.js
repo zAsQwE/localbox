@@ -1,6 +1,6 @@
 "use strict";
 //
-// LocalBox server — синтез речи (TTS) для игр вроде Mad Verse City. Полностью локально/офлайн.
+// LocalBox — синтез речи (TTS) для игр вроде Mad Verse City. Полностью локально/офлайн.
 // Движок выбирается через LOCALBOX_TTS_ENGINE: silero | espeak | silent | auto (по умолчанию).
 //   silero  — нейросетевой русский голос (Python-воркер tts/silero_worker.py, нужен torch), лучшее качество;
 //   espeak  — робо-голос (espeak-ng), лёгкий;
@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const { execFile, execFileSync, spawn } = require("child_process");
 const u = require("./util.js");
+const { SpeechCache } = require("./tts-cache.js");
 
 const DIR = path.join(__dirname, "..", "storage", "tts");
 // Кросс-платформенная проверка «команда есть в PATH» (см. пояснение в render.js — sh нет на Windows).
@@ -60,9 +61,10 @@ const PY_ENV = Object.assign({}, process.env, { PYTHONIOENCODING: "utf-8", PYTHO
 function piperVoiceReady(voice) {
     return fs.existsSync(path.join(PIPER_DIR, voice + ".onnx")) && fs.existsSync(path.join(PIPER_DIR, voice + ".onnx.json"));
 }
-function piperEnsure(voice) {
+function piperEnsure(voice, allowDownload = true) {
     return new Promise((resolve) => {
         if (piperVoiceReady(voice)) return resolve(true);
+        if (!allowDownload) return resolve(false);
         console.log("[tts] Piper: скачиваю голос " + voice + " (один раз)…");
         let p;
         try { p = spawn(PYTHON, ["-m", "piper.download_voices", voice, "--data-dir", PIPER_DIR], { env: PY_ENV, timeout: 600000 }); }
@@ -78,44 +80,31 @@ function piperEnsure(voice) {
         });
     });
 }
-async function piperSynth(text, voice, out) {
+async function piperSynth(text, voice, out, allowDownload = true) {
     fs.mkdirSync(PIPER_DIR, { recursive: true });
-    if (!(await piperEnsure(voice))) return false;
-    return new Promise((resolve) => {
-        let p;
-        try { p = spawn(PYTHON, ["-m", "piper", "-m", voice, "--data-dir", PIPER_DIR, "-f", out], { env: PY_ENV, timeout: 120000 }); }
-        catch (e) { console.log("[tts] Piper: не запустить (" + e.message + ")"); return resolve(false); }
-        let err = "";
-        p.stderr.on("data", (d) => { err += d.toString(); });
-        p.stdout.resume();
-        p.stdin.on("error", () => resolve(false));
-        try { p.stdin.write(String(text || " ").slice(0, 900)); p.stdin.end(); } catch { /* ignore */ }
-        p.on("error", () => resolve(false));
-        p.on("close", (code) => {
-            const ok = code === 0 && fs.existsSync(out) && fs.statSync(out).size > 100;
-            if (!ok && err) console.log("[tts] Piper: " + err.trim().split("\n").pop().slice(0, 200));
-            resolve(ok);
-        });
-    });
+    if (!(await piperEnsure(voice, allowDownload))) return false;
+    return await piper.start() && await piper.synth({ text, out });
 }
 
 // ---- Общий Python-воркер (модель грузится один раз, запросы по stdin/stdout JSON) ----
-// Используется для Silero. synth(payload) → Promise<bool>, поля payload идут воркеру.
-function makeWorker(scriptRel, label) {
-    let proc = null, ready = null;
+// Silero/Piper: synth(payload) → Promise<bool>, поля payload идут воркеру.
+function makeWorker(scriptRel, label, extraEnv = {}) {
+    let proc = null, ready = null, retryAfter = 0;
     const pend = new Map();
     let rid = 0;
-    function start() {
+    function start(allowDownload = true) {
         if (ready) return ready;
+        if (Date.now() < retryAfter) return Promise.resolve(false);
         ready = new Promise((resolve) => {
             let p;
-            try { p = spawn(PYTHON, [path.join(__dirname, "..", "tts", scriptRel)], { env: PY_ENV }); }
-            catch { resolve(false); return; }
+            try { p = spawn(PYTHON, [path.join(__dirname, "..", "tts", scriptRel)], { env: Object.assign({}, PY_ENV, extraEnv, { LOCALBOX_TTS_ALLOW_DOWNLOAD: allowDownload ? "1" : "0" }) }); }
+            catch { retryAfter = Date.now() + 60000; resolve(false); return; }
             proc = p;
             let buf = "", failed = false;
             const fail = () => {
                 if (failed) return;
                 failed = true;
+                retryAfter = Date.now() + 60000;
                 clearTimeout(timer);
                 resolve(false);
                 if (proc === p) { proc = null; ready = null; }
@@ -126,7 +115,7 @@ function makeWorker(scriptRel, label) {
             const timer = setTimeout(() => {
                 console.log("[tts] " + label + ": таймаут загрузки модели");
                 fail();
-            }, 600000);
+            }, 120000);
             p.stdout.setEncoding("utf8");
             p.stdout.on("data", (d) => {
                 if (failed) return;
@@ -147,6 +136,7 @@ function makeWorker(scriptRel, label) {
                             fail();
                         }
                     } else if (m.id != null && pend.has(m.id)) {
+                        if (!m.ok && m.error) console.log("[tts] " + label + ": " + String(m.error).slice(0, 200));
                         const finish = pend.get(m.id); pend.delete(m.id); finish(!!m.ok);
                     }
                 }
@@ -162,16 +152,18 @@ function makeWorker(scriptRel, label) {
         return new Promise((resolve) => {
             if (!proc) return resolve(false);
             const id = ++rid;
-            const timer = setTimeout(() => { pend.delete(id); resolve(false); }, 120000);
+            const timer = setTimeout(() => { pend.delete(id); if(proc) proc.kill(); resolve(false); }, 120000);
             pend.set(id, (ok) => { clearTimeout(timer); resolve(ok); });
             try { proc.stdin.write(JSON.stringify(Object.assign({ id }, payload)) + "\n"); }
             catch { clearTimeout(timer); pend.delete(id); resolve(false); }
         });
     }
-    return { start, synth };
+    function close() { if (proc) proc.kill(); }
+    return { start, synth, close };
 }
 
 const silero = makeWorker("silero_worker.py", "Silero");
+const piper = makeWorker("piper_worker.py", "Piper", { LOCALBOX_PIPER_MODEL: path.join(PIPER_DIR, piperVoice() + ".onnx") });
 
 // wav -> mp3 (если есть ffmpeg), иначе оставляем wav. Возвращает имя файла в DIR или null.
 async function toAudio(id) {
@@ -180,7 +172,7 @@ async function toAudio(id) {
     if (FFMPEG) {
         const mp3 = path.join(DIR, id + ".mp3");
         // громче + выровнять громкость (Silero/espeak часто тихие). loudnorm с запасом.
-        const ok = await run(FFMPEG, ["-y", "-i", wav, "-af", "loudnorm=I=-11:TP=-1.5:LRA=11,volume=1.5", mp3]);
+        const ok = await run(FFMPEG, ["-y", "-threads", "1", "-i", wav, "-filter_threads", "1", "-af", "loudnorm=I=-11:TP=-1.5:LRA=11,volume=1.5", "-threads", "1", mp3]);
         if (ok && fs.existsSync(mp3) && fs.statSync(mp3).size > 0) { try { fs.unlinkSync(wav); } catch { /* ignore */ } return id + ".mp3"; }
     }
     return id + ".wav";
@@ -212,26 +204,51 @@ async function silence(id, text) {
 }
 
 // Возвращает имя аудиофайла в DIR (mp3 или wav). Голос из игры (Polly) игнорируем — берём из настроек.
-async function generate(text, gameVoice, rate) {
-    text = String(text || " ").slice(0, 900);
+async function synthesize(text, rate, job) {
     fs.mkdirSync(DIR, { recursive: true });
-    const id = u.makeToken(16);
+    const id = (job.owner ? "match-" + job.owner.id + "-temp-" : "") + u.makeToken(16);
     const wav = path.join(DIR, id + ".wav");
     const order = ENGINE === "auto" ? ["silero", "piper", "espeak"] : [ENGINE];
 
     for (const eng of order) {
         if (eng === "silero") {
-            if (await silero.start() && await silero.synth({ text, speaker: sileroSpeaker(), out: wav })) { const n = await toAudio(id); if (n) return n; }
+            if (await silero.start(job.foreground) && await silero.synth({ text, speaker: sileroSpeaker(), out: wav })) { const n = await toAudio(id); if (n) return { file: n, cacheable: true }; }
         } else if (eng === "piper") {
-            if (await piperSynth(text, piperVoice(), wav)) { const n = await toAudio(id); if (n) return n; }
+            if (await piperSynth(text, piperVoice(), wav, job.foreground)) { const n = await toAudio(id); if (n) return { file: n, cacheable: true }; }
         } else if (eng === "espeak" && ESPEAK) {
             let speed = 175; const m = /(\d+)%/.exec(String(rate || ""));
             if (m) speed = Math.max(80, Math.min(400, Math.round(175 * parseInt(m[1], 10) / 100)));
             const ok = await run(ESPEAK, ["-v", espeakVoice(VOICE), "-s", String(speed), "-w", wav, text || " "]);
-            if (ok) { const n = await toAudio(id); if (n) return n; }
+            if (ok) { const n = await toAudio(id); if (n) return { file: n, cacheable: true }; }
         }
     }
-    return silence(id, text);
+    return { file: await silence(id, text), cacheable: false };
 }
 
-module.exports = { generate, DIR };
+function stamp(file) { try { const stat = fs.statSync(file); return [stat.size, stat.mtimeMs]; } catch { return null; } }
+const cache = new SpeechCache({ directory: DIR, render: synthesize,
+    signature: ["tts-v2", ENGINE, VOICE, !!FFMPEG, stamp(path.join(PIPER_DIR, piperVoice() + ".onnx")),
+        stamp(path.join(PIPER_DIR, piperVoice() + ".onnx.json")), stamp(path.join(__dirname, "..", "tts", "v4_ru.pt"))] });
+function rateKey(rate) {
+    // Piper and Silero previously ignore Polly's speed hint. Keep that behavior,
+    // so preloaded speech matches requests from robots with different Polly rates.
+    if (ENGINE === "piper" || ENGINE === "silero") return "100%";
+    const match = /(\d+)%/.exec(String(rate || ""));
+    return (match ? Math.max(46, Math.min(229, Number(match[1]))) : 100) + "%";
+}
+function generate(text, gameVoice, rate, owner = null) { return cache.request(text, rateKey(rate), { owner }); }
+function prefetch(text, scope, rate) {
+    // Anticipation never downloads models or speaks every possible word in the game.
+    if (process.env.LOCALBOX_TTS_PREFETCH === "0" || ENGINE === "silent") return;
+    if ((ENGINE === "silero" || ENGINE === "auto") && !fs.existsSync(path.join(__dirname, "..", "tts", "v4_ru.pt"))) return;
+    if (ENGINE === "piper" && !piperVoiceReady(piperVoice())) return;
+    cache.request(text, rateKey(rate), { background: true, scope, owner: scope && scope.owner }).catch(() => {});
+}
+function cancelPrefetch(scope) { cache.cancelScope(scope); }
+function createSession() { return cache.createOwner(); }
+function endSession(owner) {
+    return cache.releaseOwner(owner).catch((error) => console.log("[tts] Не удалось очистить записи партии: " + error.message));
+}
+function shutdown() { cache.close(); silero.close(); piper.close(); }
+
+module.exports = { generate, prefetch, cancelPrefetch, createSession, endSession, shutdown, DIR };

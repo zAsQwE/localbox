@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Системные зависимости; приложение и venv размещает Python-мастер.
+source "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"
 set -euo pipefail
 mode="${1:---full}"
 tts="${2:-piper}"
@@ -40,7 +41,7 @@ if [ "$mode" = "--full" ]; then
 fi
 if [ "${#packages[@]}" -gt 0 ]; then
     if ! localbox_install_packages "${packages[@]}"; then
-        printf '%s\n' 'Пакетный менеджер не завершил установку. Проверяю, какие зависимости доступны.' >&2
+        printf '%s\n' "$(localbox_text 'Пакетный менеджер не завершил установку. Проверяю, какие зависимости доступны.' 'Package manager did not finish. Checking available dependencies.')" >&2
     fi
 fi
 if [ "$mode" = "--full" ] && ! localbox_use_node; then
@@ -51,21 +52,21 @@ if [ "$mode" = "--full" ] && ! localbox_use_node; then
     esac
     if [ "${#node_packages[@]}" -gt 0 ]; then
         if ! localbox_install_packages "${node_packages[@]}"; then
-            printf '%s\n' 'Не удалось установить Node.js через пакетный менеджер. Повторный поиск, затем официальный способ установки.' >&2
+            printf '%s\n' "$(localbox_text 'Не удалось установить Node.js через пакетный менеджер. Повторный поиск, затем официальный способ установки.' 'Node.js package installation failed. Checking installed tools again, then trying the official installation method.')" >&2
         fi
     fi
     # Also handles packages that installed an obsolete Node or a broken npm.
     localbox_ensure_node
 fi
-python3 -c 'import sys; assert sys.version_info >= (3,10), "Нужен Python 3.10+"'
+python3 -c 'import sys; assert sys.version_info >= (3,10), "Python 3.10+ required"'
 if [ "$mode" = "--gui" ]; then python3 -c 'import tkinter'; fi
 if [ "$mode" = "--full" ]; then
     localbox_ensure_node
-    node -e 'if (+process.versions.node.split(".")[0] < 18) throw Error("Нужен Node.js 18+")'
-    python3 -c 'import tkinter' || { printf "%s\n" "Не найден Tk для лаунчера. Установите пакет Python Tk своей системы." >&2; exit 1; }
+    node -e 'if (+process.versions.node.split(".")[0] < 18) throw Error("Node.js 18+ required")'
+    python3 -c 'import tkinter' || { printf "%s\n" "$(localbox_text 'Не найден Tk для лаунчера. Установите пакет Python Tk своей системы.' 'Tk not found. Install your system Python Tk package.')" >&2; exit 1; }
     npm --version
     for tool in npm git ffmpeg openssl; do
-        command -v "$tool" >/dev/null || { printf "Не найдена зависимость: %s. Установка системных пакетов не завершилась.\n" "$tool" >&2; exit 1; }
+        command -v "$tool" >/dev/null || { localbox_text 'Не найдена зависимость: %s. Установка системных пакетов не завершилась.\n' 'Missing dependency: %s. System package installation did not finish.\n' "$tool" >&2; exit 1; }
     done
     # Propagate paths to the Python wizard, whose PATH cannot be changed by this child.
     python3 - "$LOCALBOX_SOURCE/launcher/install-paths.json" "$(command -v node)" "$(command -v npm)" <<'PY'
