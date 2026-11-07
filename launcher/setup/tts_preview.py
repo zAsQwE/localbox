@@ -38,7 +38,8 @@ def _py_env(extra: dict | None = None) -> dict:
     env["PYTHONUTF8"] = "1"
     if extra:
         env.update(extra)
-    return env
+    from .runtime import python_ca_env
+    return python_ca_env(_py(), env)  # Windows: voices and the Silero model download over HTTPS
 
 
 def _espeak_voice(voice: str) -> str:

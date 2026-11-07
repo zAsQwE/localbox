@@ -197,6 +197,8 @@ class EngineProcess:
         env["LOCALBOX_TTS_VOICE"] = _s.get("tts_voice", "eugene")
         _tts_py = (_s.get("tts_python") or "").strip()
         env["LOCALBOX_PYTHON"] = _tts_py or (sys.executable if not getattr(sys, "frozen", False) else (shutil.which("python3") or "python3"))
+        from .runtime import python_ca_env
+        env = python_ca_env(env["LOCALBOX_PYTHON"], env)  # Windows: the Silero worker may download its model
         # Додо Ре Ми: включаем локальный рендер выступления, если в настройках включено
         # (либо если флаг уже задан в окружении, напр. из start-server.bat).
         dodo = os.environ.get("LOCALBOX_DODO")

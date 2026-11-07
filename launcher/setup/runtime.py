@@ -15,6 +15,20 @@ def paths():
         return {}
 
 
+def python_ca_env(python, env):
+    """Add certifi's roots for a TTS Python on Windows (SSL_CERT_FILE; other systems unchanged).
+
+    Windows Python reads the ROOT store directly and, unlike Windows itself, never fetches a
+    missing root on demand, so on a fresh system HTTPS to Hugging Face (Piper voices) or the
+    Silero model host fails with "unable to get local issuer certificate". Python loads the
+    file on top of ROOT, so locally trusted roots keep working.
+    """
+    if os.name != "nt" or env.get("SSL_CERT_FILE"):
+        return env
+    bundle = Path(python).parent.parent / "Lib" / "site-packages" / "certifi" / "cacert.pem"
+    return {**env, "SSL_CERT_FILE": str(bundle)} if bundle.is_file() else env
+
+
 def directory():
     return Path(paths().get("runtime") or plat.repo_root() / "runtime")
 

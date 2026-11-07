@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ sys.path.insert(0, str(SOURCE / "launcher"))
 from setup.i18n import tr
 from setup.dodo import songs_directory, import_dodo
 from setup.npm import invocation as npm_invocation
+from setup.runtime import python_ca_env
 PIPER_VOICES = ("ru_RU-denis-medium", "ru_RU-dmitri-medium", "ru_RU-irina-medium", "ru_RU-ruslan-medium")
 ROOT_FILES = ("LICENSE", "README.md", "start-server.sh", "start-server.bat", "setup.sh", "install.bat", "version.json")
 
@@ -103,13 +105,16 @@ def run(command, log=print, cwd=None, env=None, input_text=None):
         raise RuntimeError(tr('Команда завершилась с ошибкой {0}: {1}', process.returncode, command[0]))
 
 
-def download(url, target, log=print):
+def download(url, target, log=print, cafile=None):
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     log(tr('Загрузка: ') + url)
     partial = target.with_suffix(target.suffix + ".part")
     try:
-        with urllib.request.urlopen(url, timeout=60) as response, partial.open("wb") as output:
+        context = ssl.create_default_context(cafile=cafile) if cafile else None
+        if context:
+            context.load_default_certs()  # certifi on top of the system roots
+        with urllib.request.urlopen(url, timeout=60, context=context) as response, partial.open("wb") as output:
             shutil.copyfileobj(response, output)
         if not partial.stat().st_size:
             raise RuntimeError(tr('Скачан пустой файл: ') + url)
@@ -133,12 +138,15 @@ def tts_install(target, runtime_dir, tts, voices, python=sys.executable, log=pri
     folder = target / "server" / "tts"
     if tts in ("silero", "both"):
         run([str(py), "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"], log, env=env)
-        run([str(py), "-m", "pip", "install", "numpy"], log, env=env)
+        run([str(py), "-m", "pip", "install", "numpy", "certifi"], log, env=env)
+        env = python_ca_env(py, env)
         model = folder / "v4_ru.pt"
         if not model.is_file():
-            download("https://models.silero.ai/models/tts/ru/v4_ru.pt", model, log)
+            download("https://models.silero.ai/models/tts/ru/v4_ru.pt", model, log, cafile=env.get("SSL_CERT_FILE"))
     if tts in ("piper", "both"):
-        run([str(py), "-m", "pip", "install", "piper-tts>=1.3,<2"], log, env=env)
+        # certifi: a fresh Windows lacks the root of Hugging Face, where the voices live.
+        run([str(py), "-m", "pip", "install", "piper-tts>=1.3,<2", "certifi"], log, env=env)
+        env = python_ca_env(py, env)
         for voice in voices:
             run([str(py), "-m", "piper.download_voices", voice, "--data-dir", str(folder / "piper")], log, env=env)
     # Проверяем настоящим синтезом до записи настроек. Модель и библиотеки должны работать офлайн.
