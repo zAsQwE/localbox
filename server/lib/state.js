@@ -6,6 +6,8 @@
 const availability = require("./game-availability.js");
 const state = {
     serverUrl: "localhost",
+    playerPort: null,   // веб-порт для телефонов, который реально занял сервер
+    port80: false,      // удалось ли занять порт 80
     games: Object.fromEntries(["appTags", "appIds", "maxPlayers", "minPlayers"].map((key) => [key, Object.create(null)])),
 
     // Регистрирует игру (auto-register неизвестных). Возвращает appTag.

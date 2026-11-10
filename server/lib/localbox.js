@@ -16,11 +16,21 @@ function connectedPlayers(room) {
 // served client switches itself to ws://. The server's own HTTPS ports map to
 // their HTTP twins; an unknown port (e.g. a forwarded tunnel) keeps HTTPS.
 const HTTP_TWIN = { "": "", "80": "", "443": "", "38202": ":38202", "38203": ":38202" };
+const state = require("./state.js");
+const network = require("./network.js");
+
 function joinOrigin(authority) {
     const match = String(authority || "localhost").match(/^(\[[^\]]*\]|[^:]*)(?::(\d+))?$/);
     if (!match) return "https://" + authority;
     const port = match[2] || "";
-    return Object.hasOwn(HTTP_TWIN, port) ? "http://" + match[1] + HTTP_TWIN[port] : "https://" + authority;
+    if (!Object.hasOwn(HTTP_TWIN, port)) return "https://" + authority;
+    // Без явного порта QR ведёт на веб-порт для телефонов, если он задан (LOCALBOX_PLAYER_PORT —
+    // на SteamOS 80/443 закрыты брандмауэром) или если порт 80 занять не удалось. Если 38202 был
+    // занят, это следующий свободный. Только для локальной сети: на VPS с доменом остаётся порт 80.
+    const web = state.playerPort;
+    const bare = port === "" || port === "80" || port === "443";
+    const usePlayerPort = web && bare && network.isLocalHost(match[1]) && (process.env.LOCALBOX_PLAYER_PORT || !state.port80);
+    return "http://" + match[1] + (usePlayerPort ? ":" + web : HTTP_TWIN[port]);
 }
 
 function roomStatus(room, serverUrl) {
@@ -90,4 +100,4 @@ function onRoomEvent(roomManager, code, _event) {
     if (room) tryAutoStart(room);
 }
 
-module.exports = { AUTO_START_FULL, connectedPlayers, roomStatus, findVip, findStartAction, tryAutoStart, onRoomEvent };
+module.exports = { AUTO_START_FULL, connectedPlayers, roomStatus, findVip, findStartAction, tryAutoStart, onRoomEvent, joinOrigin };
