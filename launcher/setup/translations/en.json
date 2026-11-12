@@ -295,7 +295,7 @@
   "node не найден. Установите Node.js (https://nodejs.org).": "node not found. Install Node.js (https://nodejs.org).",
   "Автостарт включён: игра запустится, когда комната заполнится.": "Auto-start enabled: the game starts when the room fills up.",
   "Додо Ре Ми: поддержка включена (локальный рендер выступления, нужен ffmpeg).": "Dodo Re Mi enabled (local performance rendering; ffmpeg required).",
-  "Читы включены для: {0} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).": "Cheats enabled for: {0} (join using this nickname — right overlay / Ctrl+Shift+K).",
+  "Читы включены для: {0}. Ключ доступа: {1} (в игре Ctrl+Shift+K → ник и ключ; дальше ключ запоминается).": "Cheats enabled for: {0}. Access key: {1} (in game Ctrl+Shift+K → nickname and key; the key is remembered afterwards).",
   "Код комнаты зафиксирован: {0}": "Fixed room code: {0}",
   "Режим -no-web: веб-клиент не раздаётся (только игровой сервер).": "-no-web mode: player website disabled (game server only).",
   "Порты 80/443 уже разрешены для node ({0}).": "Ports 80/443 already permitted for Node.js ({0}).",
@@ -586,5 +586,7 @@
   "Справа внизу": "Bottom right",
   "Слева внизу": "Bottom left",
   "Справа вверху": "Top right",
-  "Слева вверху": "Top left"
+  "Слева вверху": "Top left",
+  "Пускать подключения не из локальной сети": "Accept connections from outside the local network",
+  "Нужно для проброса портов на роутере. Локальная сеть, Porthole, Radmin VPN, Hamachi и Tailscale работают и без этой галочки; сервер на VPS пускает всех всегда.": "Needed for router port forwarding. The local network, Porthole, Radmin VPN, Hamachi and Tailscale work without it; a server on a VPS always accepts everyone."
 }

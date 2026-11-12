@@ -17,6 +17,7 @@ import glob
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -214,6 +215,11 @@ class EngineProcess:
         _admins = (_s.get("admin_nicks") or os.environ.get("LOCALBOX_ADMINS") or "").strip()
         if _admins:
             env["LOCALBOX_ADMINS"] = _admins
+            _key = (_s.get("admin_key") or "").strip()
+            if not _key:
+                _key = _s["admin_key"] = secrets.token_urlsafe(9)
+                settings.save(_s)
+            env["LOCALBOX_ADMIN_KEY"] = _key
             _content = (_s.get("cheat_content_dir") or "").strip()
             if _content:
                 env["LOCALBOX_CHEAT_CONTENT"] = _content
@@ -222,11 +228,16 @@ class EngineProcess:
                                      ("cheat_price", "LOCALBOX_CHEAT_PRICE"),
                                      ("cheat_highlight", "LOCALBOX_CHEAT_HIGHLIGHT")):
                 env[variable] = "1" if _s.get(option, True) else "0"
-            self.on_log(tr('Читы включены для: {0} (зайди в игру под этим ником — оверлей справа / Ctrl+Shift+K).', _admins))
+            self.on_log(tr('Читы включены для: {0}. Ключ доступа: {1} (в игре Ctrl+Shift+K → ник и ключ; дальше ключ запоминается).', _admins, _key))
         # Фиксированный код комнаты (свой/русский), если задан. В ВЕРХНЕМ регистре — клиент при вводе
         # всё равно апперкейсит код, иначе набранный «игра» не совпадёт с комнатой «Игра».
         from .game_tls import porthole_port
         _porthole = _s.get("porthole_enabled", True) and porthole_port(_s.get("porthole_port", 80))
+        # Подключения не из локальной сети (проброс портов). Иначе сервер решает сам по serverUrl.
+        if _s.get("allow_public", False):
+            env["LOCALBOX_ALLOW_PUBLIC"] = "1"
+        else:
+            env.pop("LOCALBOX_ALLOW_PUBLIC", None)
         if _porthole and _porthole != 80:
             env["LOCALBOX_PORTHOLE_PORT"] = str(_porthole)
             self.on_log(tr('Porthole: дополнительный веб-порт {0} (поделитесь им в Porthole).', _porthole))

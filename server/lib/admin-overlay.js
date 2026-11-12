@@ -2,6 +2,7 @@
 if(window.__lbxAdmin)return;window.__lbxAdmin=1;
 var ws=null,code=null,ents=Object.create(null),players=[],me=null,appTag='',open=false,authed=false,nick='',poll=null;
 var hints={answers:[],prices:[],contentCount:0},rooms=[],startAuth=null,retry=null;
+var key='';try{key=localStorage.getItem('lbxKey')||'';}catch(_){}   // ключ доступа (из лога лаунчера)
 var SHOWANS=!(window.__lbxCfg&&window.__lbxCfg.showAnswer===false);   // показывать «правильный ответ» (настройка)
 var SHOWPRICE=!(window.__lbxCfg&&window.__lbxCfg.showPrice===false);  // показывать цену картины (Дуракцион)
 var HILITE=!(window.__lbxCfg&&window.__lbxCfg.highlight===false);     // подсвечивать правильную кнопку в игре
@@ -59,9 +60,9 @@ tab.onclick=function(e){if(e.target===hideBtn)return;open=!open;panel.classList.
 hideBtn.onclick=function(e){e.stopPropagation();open=false;panel.classList.remove('on');root.style.display='none';};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(x){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[x];});}
 function fmt(v){try{return typeof v==='string'?v:JSON.stringify(v,null,1);}catch(_){return String(v);}}
-function tryAuth(){if(!nick)return;clearTimeout(retry);if(poll){clearInterval(poll);poll=null;}
+function tryAuth(){if(!nick||!key)return;clearTimeout(retry);if(poll){clearInterval(poll);poll=null;}
  var old=ws;ws=null;try{old&&old.close();}catch(_){}authed=false;
- var url=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/admin/ws?nick='+encodeURIComponent(nick);
+ var url=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/admin/ws?nick='+encodeURIComponent(nick)+'&key='+encodeURIComponent(key);
  var current;try{current=ws=new OWS(url);}catch(_){return;}
  current.onmessage=function(e){if(ws!==current)return;try{handle(JSON.parse(e.data));}catch(_){}};
  current.onclose=function(){if(ws!==current)return;var connected=authed;authed=false;hints={answers:[],prices:[],contentCount:0};
@@ -71,7 +72,7 @@ startAuth=tryAuth;
 function sendc(o){if(!ws||ws.readyState!==1)return;if(!o.code)o.code=code;ws.send(JSON.stringify(o));}
 function watch(c){code=c;ents=Object.create(null);hints={answers:[],prices:[],contentCount:0};sendc({cmd:'watch',code:c});}
 function handle(m){
- if(m.t==='ok'){authed=true;rooms=m.rooms||[];root.style.display='';
+ if(m.t==='ok'){authed=true;try{localStorage.setItem('lbxKey',key);}catch(_){}rooms=m.rooms||[];root.style.display='';
    if(code&&rooms.some(function(r){return r.code===code;}))watch(code);else if(rooms.length===1)watch(rooms[0].code);else code=null;
    render();if(!poll)poll=setInterval(function(){sendc({cmd:'rooms'});if(code)sendc({cmd:'players'});},3000);}
  else if(m.t==='rooms'){rooms=m.rooms||[];if(!code&&rooms.length===1)watch(rooms[0].code);
@@ -132,7 +133,9 @@ function render(){
    var inp=document.createElement('input');inp.placeholder='твой ник (админа)';inp.value=nick||'';inp.style.flex='1';
    inp.oninput=function(){nick=inp.value.trim();};inp.onkeydown=function(e){if(e.key==='Enter')tryAuth();};
    var b=document.createElement('button');b.textContent='войти';b.onclick=tryAuth;
-   rl.appendChild(inp);rl.appendChild(b);hl.appendChild(rl);
+   var ki=document.createElement('input');ki.type='password';ki.placeholder='ключ из лаунчера';ki.value=key||'';ki.style.flex='1';
+   ki.oninput=function(){key=ki.value.trim();};ki.onkeydown=inp.onkeydown;
+   rl.appendChild(inp);rl.appendChild(ki);rl.appendChild(b);hl.appendChild(rl);
    if(window.__lbxErr){var er=document.createElement('div');er.className='mut';er.textContent=window.__lbxErr;hl.appendChild(er);}
    panel.innerHTML='';panel.appendChild(hl);setTimeout(function(){try{inp.focus();}catch(_){}}, 0);return;
  }
@@ -205,7 +208,7 @@ document.addEventListener('keydown',function(e){
    window.__lbxManual=true;root.style.display='';open=true;panel.classList.add('on');render();}
 },true);
 setInterval(function(){pinPrice();highlightAnswer();},600);   // ценник у картины + подсветка правильной кнопки
-try{console.log('[LocalBox] оверлей читов загружен. Если панель не появилась сама — Ctrl+Shift+K и введи админ-ник.');}catch(_){}
+try{console.log('[LocalBox] оверлей читов загружен. Если панель не появилась сама — Ctrl+Shift+K и введи админ-ник и ключ.');}catch(_){}
 if(nick)tryAuth();
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();

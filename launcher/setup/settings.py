@@ -22,6 +22,7 @@ DEFAULTS = {
     "tmp3_path": "",        # установленная Trivia Murder Party 3; резервная копия хранится в игре
     "qr_overlay": True,
     "qr_position": "bottom-right",  # угол экрана для QR: bottom-right/bottom-left/top-right/top-left       # QR активной комнаты поверх игры в правом нижнем углу
+    "allow_public": False,  # пускать подключения не из локальной сети (проброс портов); VPS — всегда
     "porthole_enabled": True, # строка Porthole на главном экране и дополнительный веб-порт
     "porthole_port": 80,      # веб-порт для Porthole; не 80 = дополнительный HTTP-порт (напр. 9999)
     "auto_start_full": False, # нажать VIP-действие start, когда комната заполнена
@@ -36,6 +37,7 @@ DEFAULTS = {
     "render_instr": 4.0,    # громкость инструмента в рендере Додо Ре Ми (LOCALBOX_RENDER_INSTR)
     "render_backing": 0.45, # громкость бэкинга (0..1) в рендере (LOCALBOX_RENDER_BACKING)
     "admin_nicks": "",      # ники (через запятую), которым доступны читы (оверлей в игре)
+    "admin_key": "",        # ключ доступа к читам; пусто = сгенерировать при первом запуске
     "cheat_content_dir": "", # папка игры/Jackbox или steamapps/common; пусто = поиск в библиотеках Steam
     "cheat_answer": True,   # показывать «правильный ответ» списком в панели читов
     "cheat_highlight": True,  # подсвечивать найденные правильные варианты на кнопках

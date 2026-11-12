@@ -7,13 +7,13 @@
 //
 
 const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const { randomBytes } = require("crypto");
+const { randomBytes, randomInt } = require("crypto");
 
 function randInt(min, max) { return Math.floor(Math.random() * (max - min) + min); }
 
 function makeCode() {
     let s = "";
-    for (let i = 0; i < 4; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+    for (let i = 0; i < 4; i++) s += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
     return s;
 }
 

@@ -2,7 +2,8 @@
 //
 // LocalBox — читы для приватной игры в LAN (оверлей прямо в игре, без отдельной веб-страницы).
 //
-// Доступ по нику из LOCALBOX_ADMINS (список ников через запятую). Читы встраиваются в игровой
+// Доступ по нику из LOCALBOX_ADMINS (список ников через запятую) и ключу LOCALBOX_ADMIN_KEY
+// (если не задан — генерируется при старте и печатается в лог). Читы встраиваются в игровой
 // клиент оверлеем (вкладка справа). Возможности:
 //   • God view — видеть ВСЕ сущности комнаты в реальном времени (секретные ответы/голоса/рисунки);
 //   • правильный ответ — подсветка (для викторин/Бредовухи); включается LOCALBOX_CHEAT_ANSWER;
@@ -13,6 +14,7 @@
 // прочие сущности хост просто хранит, поэтому подмена «прилипает». Только для игры с друзьями.
 //
 
+const crypto = require("crypto");
 const mgr = require("./room.js");
 const cheats = require("./cheat-answers.js");
 let contentIndex;
@@ -31,6 +33,12 @@ const SHOW_ANSWER = process.env.LOCALBOX_CHEAT_ANSWER !== "0";
 const SHOW_PRICE = process.env.LOCALBOX_CHEAT_PRICE !== "0";
 // Подсвечивать найденные правильные варианты на кнопках. Выкл: LOCALBOX_CHEAT_HIGHLIGHT=0.
 const SHOW_HIGHLIGHT = process.env.LOCALBOX_CHEAT_HIGHLIGHT !== "0";
+const KEY = (process.env.LOCALBOX_ADMIN_KEY || "").trim() || crypto.randomBytes(9).toString("base64url");
+function keyOk(value) {
+    const a = Buffer.from(String(value || "")), b = Buffer.from(KEY);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function key() { return KEY; }
 function isAdmin(nick) { return ADMINS.has(String(nick || "").trim().toLowerCase()); }
 function enabled() { return ADMINS.size > 0; }
 function adminList() { return [...ADMINS]; }
@@ -81,7 +89,7 @@ function onRoomEvent(code, ev) {
 }
 
 function handleWs(ws, query) {
-    if (!isAdmin(query.nick)) { send(ws, { t: "err", msg: "ник «" + (query.nick || "") + "» не в списке админов" }); try { ws.close(); } catch { /* ignore */ } return; }
+    if (!isAdmin(query.nick) || !keyOk(query.key)) { send(ws, { t: "err", msg: "неверный ник или ключ" }); try { ws.close(); } catch { /* ignore */ } return; }
     subs.set(ws, null);
     send(ws, { t: "ok", nick: query.nick, rooms: roomsSummary() });
     ws.on("message", (data) => {
@@ -133,4 +141,4 @@ function mountHttp(app) {
 // Появляется вкладка справа; вводишь ник → если админ, открывается панель с читами прямо в игре.
 const OVERLAY_JS = require("node:fs").readFileSync(require("node:path").join(__dirname, "admin-overlay.js"), "utf8");
 
-module.exports = { isAdmin, enabled, adminList, handleWs, mountHttp, onRoomEvent };
+module.exports = { isAdmin, enabled, adminList, key, handleWs, mountHttp, onRoomEvent };

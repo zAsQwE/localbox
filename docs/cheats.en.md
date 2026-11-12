@@ -5,7 +5,8 @@
 In launcher Settings, enter comma-separated admin nicknames. Enable answer highlighting, the correct-answer
 panel or Bidiots painting values as desired. Save, restart the server and join with an authorized nickname.
 The overlay attaches to Ecast and older Blobcast games. Open it with the right-hand tab or Ctrl+Shift+K.
-For manual access, enter an admin nickname and select the room.
+On first use, enter an admin nickname and the **access key** shown in the launcher log when the server starts
+(or set your own with `LOCALBOX_ADMIN_KEY`). The browser remembers the key and reconnects automatically.
 
 ## Fibbage and Trivia Murder Party
 
@@ -31,5 +32,6 @@ Player balance and current bids are not used as painting values. When the visibl
 a price appears beside it; otherwise use the panel's price list. Conflicting estimates for one title are hidden.
 Before estimates arrive, prices remain unknown.
 
-Only admin-overlay connections with nicknames in `LOCALBOX_ADMINS` receive these hints; regular game messages
-and rules are unchanged. Access is nickname-based and intended for a trusted group on your own LocalBox server.
+Only admin-overlay connections with nicknames in `LOCALBOX_ADMINS` and the access key receive these hints; regular game messages
+and rules are unchanged. Access needs both a listed nickname and the key, so another device on the same
+network cannot read answers or kick players just by using an admin nickname.

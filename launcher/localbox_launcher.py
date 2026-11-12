@@ -756,6 +756,7 @@ def run_gui():
         dl_var = tk.BooleanVar(value=cfg.get("download_missing", True))
         game_images_var = tk.BooleanVar(value=cfg.get("download_game_images", True))
         porthole_var = tk.BooleanVar(value=cfg.get("porthole_enabled", True))
+        public_var = tk.BooleanVar(value=cfg.get("allow_public", False))
         tts_var = tk.StringVar(value=cfg.get("tts_engine", "auto"))
         voice_var = tk.StringVar(value=cfg.get("tts_voice", "eugene"))
         tts_python_var = tk.StringVar(value=cfg.get("tts_python", ""))
@@ -926,6 +927,11 @@ def run_gui():
                         variable=porthole_var, style="Card.TCheckbutton").pack(anchor="w")
         ttk.Label(card, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
                   text=tr('Показывает на главном экране порт и ссылку для друга. Если выключить, строка Porthole скрывается и дополнительный веб-порт не открывается; обычный порт 80 работает как прежде.')
+                  ).pack(anchor="w", pady=(5, 8))
+        ttk.Checkbutton(card, text=tr('Пускать подключения не из локальной сети'),
+                        variable=public_var, style="Card.TCheckbutton").pack(anchor="w")
+        ttk.Label(card, style="Card.TLabel", foreground=MUTED, justify="left", wraplength=WRAP,
+                  text=tr('Нужно для проброса портов на роутере. Локальная сеть, Porthole, Radmin VPN, Hamachi и Tailscale работают и без этой галочки; сервер на VPS пускает всех всегда.')
                   ).pack(anchor="w", pady=(5, 8))
         ttk.Checkbutton(card, text=tr('Скачивать недостающие текстуры с jackbox.ru'),
                         variable=dl_var, style="Card.TCheckbutton").pack(anchor="w")
@@ -1126,6 +1132,7 @@ def run_gui():
             cfg["download_missing"] = dl_var.get()
             cfg["download_game_images"] = game_images_var.get()
             cfg["porthole_enabled"] = porthole_var.get()
+            cfg["allow_public"] = public_var.get()
             cfg["tts_engine"] = tts_var.get()
             cfg["tts_voice"] = voice_var.get()
             cfg["tts_python"] = tts_python_var.get().strip()

@@ -41,7 +41,10 @@ mgr.setAdminHook((code, event) => {
     admin.onRoomEvent(code, event);       // God view: события комнат → админ-панель
     localbox.onRoomEvent(mgr, code, event);
 });
-if (admin.enabled()) console.log("[admin] читы включены для ников: " + admin.adminList().join(", ") + " · панель встроена в игровой клиент");
+if (admin.enabled()) {
+    console.log("[admin] читы включены для ников: " + admin.adminList().join(", ") + " · панель встроена в игровой клиент");
+    if (!process.env.LOCALBOX_ADMIN_KEY) console.log("[admin] ключ доступа к читам: " + admin.key() + " (Ctrl+Shift+K в игре)");
+}
 // Таблица игр appId<->appTag + лимиты (нужна, чтобы комната сообщала клиенту верный appTag).
 try {
     const gj = JSON.parse(fs.readFileSync(__dirname + "/games.json", "utf8"));
@@ -56,18 +59,36 @@ const ROOM_CODE = (process.env.LOCALBOX_ROOM_CODE || "").trim();
 if (ROOM_CODE) console.log("[room] код комнаты фиксирован: " + ROOM_CODE);
 if (localbox.AUTO_START_FULL) console.log("[room] автостарт включён: игра начнётся при заполнении комнаты");
 
-const app = express();
-app.use(express.json({ limit: "10mb" }));
+// Кого пускать. Сервер в локальной сети (serverUrl — частный IP, localhost, *.local) принимает только
+// локальные адреса; сервер с публичным адресом (VPS) — всех. LOCALBOX_ALLOW_PUBLIC=1/0 — принудительно.
+const ALLOW_PUBLIC = process.env.LOCALBOX_ALLOW_PUBLIC ? process.env.LOCALBOX_ALLOW_PUBLIC === "1" : !network.isLocalHost(serverUrl);
+const EXTRA_ORIGINS = new Set((process.env.LOCALBOX_ALLOWED_ORIGINS || "").split(",").map((v) => v.trim()).filter(Boolean));
+function allowedPeer(socket) { return ALLOW_PUBLIC || network.isPrivateAddress(socket.remoteAddress); }
+if (!ALLOW_PUBLIC) console.log("[net] принимаю только локальную сеть и VPN (Radmin, Hamachi, Tailscale); проброс портов — галочка «Пускать подключения не из локальной сети» или LOCALBOX_ALLOW_PUBLIC=1");
 
-// CORS: эхо-возврат origin страницы (иначе локальная игра режется по CORS).
+const app = express();
+app.use((req, res, next) => {
+    if (allowedPeer(req.socket)) return next();
+    console.log("[net] отклонён внешний адрес " + req.socket.remoteAddress +
+        " — чтобы пускать, включите «Пускать подключения не из локальной сети» в настройках или задайте LOCALBOX_ALLOW_PUBLIC=1");
+    res.sendStatus(403);
+});
+// Большие тела нужны только рисункам и пользовательскому контенту.
+app.use(["/artifact", "/storage/content"], express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "1mb" }));
+
+// CORS: эхо-возврат origin только своим и локальным страницам (иначе локальная игра режется по CORS).
 app.use((req, res, next) => {
     // Логируем только значимое (API/комнаты/сокеты), а не каждую картинку/скрипт — иначе спам и лаги.
     const pth = req.path;
     if (process.env.LOCALBOX_DEBUG === "1" || req.method !== "GET" || /^\/(api|room|socket\.io|artifact|storage|accessToken|render|tts)/.test(pth))
         console.log(req.method, req.originalUrl, req.body && Object.keys(req.body).length ? JSON.stringify(req.body).slice(0, 300) : "");
     const origin = req.headers.origin;
-    if (origin) res.header("Access-Control-Allow-Origin", origin);
-    res.header("Access-Control-Allow-Credentials", "true");
+    if (origin && (ALLOW_PUBLIC || network.trustedOrigin(origin, req, EXTRA_ORIGINS))) {
+        res.header("Access-Control-Allow-Origin", origin);
+        res.header("Access-Control-Allow-Credentials", "true");
+    }
+    res.header("Vary", "Origin");
     res.header("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,OPTIONS");
     res.header("Access-Control-Allow-Headers", "content-type,if-none-match,x-jbg-secret,x-internal-token");
     if (req.method === "OPTIONS") return res.status(200).end();
@@ -120,6 +141,9 @@ app.get("/api/v2/app-configs/:appTag", (req, res) => {
     if (!settings) return res.status(404).send({ ok: false, error: "no app config for " + tag });
     res.send({ ok: true, body: { appId: state.games.appTags[tag] || tag, appTag: tag, settings } });
 });
+
+// GET /api/v2/ugc/list/:listId — официальные эпизоды. Локально список пуст; без ответа игры Party Starter висят на загрузке.
+app.get("/api/v2/ugc/list/:listId", (req, res) => res.send({ ok: true, body: { listId: req.params.listId, entries: [] } }));
 
 // GET /api/v2/rooms/:code — информация о комнате (клиент проверяет перед входом).
 app.get("/api/v2/rooms/:code", (req, res) => {
@@ -193,7 +217,7 @@ function activeRoom() {
         .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
 }
 app.get("/localbox/status", (_req, res) => {
-    res.set("Cache-Control", "no-store").send({ ok: true, room: localbox.roomStatus(activeRoom(), serverUrl) });
+    res.set("Cache-Control", "no-store").send({ ok: true, room: localbox.roomStatus(activeRoom(), serverUrl), playerUrl: localbox.joinOrigin(serverUrl) });
 });
 app.get("/localbox/qr.png", async (req, res) => {
     const room = req.query.code ? mgr.get(String(req.query.code).toUpperCase()) : activeRoom();
@@ -234,6 +258,14 @@ app.use((req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 
 function onUpgrade(request, socket, head) {
+    if (!allowedPeer(request.socket)) {
+        console.log("[net] отклонено WebSocket-подключение с " + request.socket.remoteAddress + " — LOCALBOX_ALLOW_PUBLIC=1, чтобы пускать");
+        socket.destroy(); return;
+    }
+    // WebSocket может открыть и чужой сайт в браузере игрока — проверяем Origin, если он есть.
+    if (!ALLOW_PUBLIC && request.headers.origin && !network.trustedOrigin(request.headers.origin, request, EXTRA_ORIGINS)) {
+        console.log("[ws] апгрейд отклонён (чужой Origin):", request.headers.origin); socket.destroy(); return;
+    }
     const [reqPath, qs] = request.url.split("?");
     const query = Object.fromEntries(new URLSearchParams(qs || ""));
     console.log("[ws] апгрейд:", reqPath, qs ? "?" + qs : "");
@@ -278,6 +310,14 @@ try {
         { s: http.createServer(app), port: 38202 },
         { s: https.createServer(ssl, app), port: 38203 },
     ];
+    // Отдельный веб-порт для телефонов (LOCALBOX_PLAYER_PORT): 38202 остаётся всегда — он нужен
+    // Blobcast-играм. Если порт занят, берётся следующий свободный; QR ведёт на фактический.
+    const playerPort = Number(process.env.LOCALBOX_PLAYER_PORT || 0);
+    if (Number.isInteger(playerPort) && playerPort >= 1024 && playerPort <= 65535 && playerPort !== 38202 && playerPort !== 38203) {
+        servers.push({ s: http.createServer(app), port: playerPort, player: true });
+    } else if (process.env.LOCALBOX_PLAYER_PORT) {
+        console.error("[net] LOCALBOX_PLAYER_PORT=" + process.env.LOCALBOX_PLAYER_PORT + " не подходит: нужен 1024–65535, кроме 38202/38203");
+    }
     // Porthole: an extra plain-HTTP web port for friends whose port 80 is taken (e.g. 9999).
     // Players get links back to whatever host:port they used, so nothing else changes.
     const portholePort = Number(process.env.LOCALBOX_PORTHOLE_PORT || 0);
@@ -297,7 +337,10 @@ try {
 
 let boundPorts = 0;
 const recentTlsErrors = new Map();
-servers.forEach(({ s, port }) => {
+servers.forEach((entry) => {
+    const { s } = entry;
+    let { port } = entry;
+    let tries = 0;
     s.on("upgrade", onUpgrade);
     // Диагностика: если хост/клиент пытается подключиться, но рвётся на TLS (недоверенный
     // самоподписанный серт) — обычный лог запросов это не покажет. Логируем такие обрывы.
@@ -324,10 +367,22 @@ servers.forEach(({ s, port }) => {
         // НЕ падаем: пропускаем недоступный порт, сервер продолжит на остальных.
         // На Android/Termux без root порты 80/443 недоступны (EACCES) — останутся 38202/38203.
         if (err.code === "EACCES") console.error("порт " + port + " без прав недоступен (Android без root / нет setcap) — пропускаю");
+        else if (err.code === "EADDRINUSE" && entry.player && ++tries <= 20) {
+            const next = port + 1 + (port + 1 === 38202 ? 2 : port + 1 === 38203 ? 1 : 0);   // свои порты не трогаем
+            console.error("порт " + port + " занят — пробую " + next);
+            port = next; s.listen(port); return;
+        }
         else if (err.code === "EADDRINUSE") console.error("порт " + port + " занят — пропускаю");
         else console.error("порт " + port + ": " + err.message + " — пропускаю");
     });
-    s.listen(port, () => { boundPorts++; console.log("LocalBox: порт " + port); });
+    s.on("listening", () => {   // один обработчик на все попытки
+        boundPorts++;
+        if (entry.player) state.playerPort = port;
+        if (port === 80) state.port80 = true;
+        if (port === 38202) state.port38202 = true;
+        console.log("LocalBox: порт " + port + (entry.player ? " (для телефонов)" : ""));
+    });
+    s.listen(port);
 });
 // Если через 3с не занялся ни один порт — сообщаем внятно.
 setTimeout(() => {

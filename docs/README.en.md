@@ -38,6 +38,33 @@ Share **TCP port 80** through [Porthole](https://store.steampowered.com/app/4963
 Your friend opens `http://127.0.0.1`. If port 80 is taken on their computer, enter another port in the
 launcher, e.g. `9999`. Details are in the [manual](manual.en.md#friends-through-porthole).
 
+## Steam Deck
+
+The server can run on the Deck itself, in Game Mode, with no PC and no internet. Run
+`tools/steamdeck/install.sh` once, then use the wrapper in every pack's launch options:
+
+| Mode | Launch options |
+| --- | --- |
+| Local | `~/LocalBox/tools/steamdeck/jackbox.sh -local %command%` |
+| Russian servers | `~/LocalBox/tools/steamdeck/jackbox.sh -online-ru %command%` |
+| Official servers | `~/LocalBox/tools/steamdeck/jackbox.sh -online %command%` |
+
+A join QR code appears over the game. Details: [Steam Deck](steam-deck.en.md).
+
+## Network and security
+
+When `serverUrl` is a local-network address, the server accepts connections only from that network, from VPNs
+(Radmin VPN, Hamachi, Tailscale) and through Porthole; with a public address or domain (VPS) it accepts everyone.
+For router port forwarding, enable "Accept connections from outside the local network" in Settings. Admin cheats require an access key, not just a nickname
+(see [cheats](cheats.en.md)). Server environment variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `LOCALBOX_ALLOW_PUBLIC` | `1` — accept everyone (same as the launcher checkbox), `0` — local network and VPN only; default: based on `serverUrl` |
+| `LOCALBOX_ALLOWED_ORIGINS` | extra websites (comma-separated) allowed to make requests to the server |
+| `LOCALBOX_ADMIN_KEY` | cheats key; if unset, one is generated at startup and written to the log |
+| `LOCALBOX_PLAYER_PORT` | separate web port for phones, also used by the QR (the next free one if taken); 38202 and 38203 always stay. Set by the Steam Deck setup |
+
 ## Updates
 
 **Check for updates → Update to …**. Settings and downloaded files are kept.
@@ -47,7 +74,7 @@ launcher, e.g. `9999`. Details are in the [manual](manual.en.md#friends-through-
 - [Manual installation and troubleshooting](manual.en.md)
 - [Installer and building a Release](install.en.md)
 - [Speech](tts.en.md) · [Dodo Re Mi](dodo-re-mi.en.md) · [Admin cheats](cheats.en.md)
-- [Android](../android/README.md)
+- [Android](../android/README.md) · [Steam Deck](steam-deck.en.md)
 
 Created with Claude and Codex. Security is not guaranteed: use it on your local network or with friends.
 LocalBox is not affiliated with Jackbox Games; original games and assets belong to their owners.
