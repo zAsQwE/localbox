@@ -36,7 +36,7 @@ In Desktop Mode, in Konsole:
    ```
 
    Games join a room only over `wss` on port 443, so this permission is required. The firewall needs no
-   changes: phones use a high port (see below).
+   changes: phones use the high port 38204 (see below).
 
 ## Launch options
 
@@ -64,13 +64,14 @@ In `-local` mode, on every launch the wrapper:
 
 | Mode | Players open | QR over the game |
 | --- | --- | --- |
-| `-local` | `http://DECK_IP:38202` | with the room code; shown in the lobby, hidden once the match starts |
+| `-local` | `http://DECK_IP:38204` | with the room code; shown in the lobby, hidden once the match starts |
 | `-online-ru` | `https://jackbox.ru` | site only; in menus and for 30 s after the room is created |
 | `-online` | `https://jackbox.fun` | site only; in menus and for 30 s after the room is created |
 
-Why 38202 and not 80: SteamOS updates reset the firewall to its default, which blocks ports 80 and 443 from the
-network but leaves 1024–65535 open. If 38202 is taken by another program, the server uses the next free port;
-the QR code and `jackbox.sh status` always show the actual one.
+Why not 80: SteamOS updates reset the firewall to its default, which blocks ports 80 and 443 from the
+network but leaves 1024–65535 open. So the setup adds a separate web port for phones,
+`LOCALBOX_PLAYER_PORT=38204`; 38202 and 38203 stay with the games. If 38204 is taken, the server uses the
+next free port; the QR code and `jackbox.sh status` always show the actual one.
 
 In online modes the room lives on an external server, so players type the code from the game screen and the
 QR only opens the site. `LOCALBOX_QR_SECONDS` sets how long it stays, `LOCALBOX_QR=0` turns it off, e.g.

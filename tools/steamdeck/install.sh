@@ -53,7 +53,7 @@ $client
 # Без Piper/Silero сервер на каждую фразу пытается скачать голос Piper; на Deck хватает espeak.
 Environment=LOCALBOX_TTS_ENGINE=espeak
 # Телефоны — на высокий порт: обновления SteamOS закрывают 80/443 брандмауэром.
-Environment=LOCALBOX_PLAYER_PORT=38202
+Environment=LOCALBOX_PLAYER_PORT=38204
 ExecStart=$NODE server.js
 StandardOutput=append:${XDG_STATE_HOME:-$HOME/.local/state}/localbox/server.log
 StandardError=inherit

@@ -24,13 +24,12 @@ function joinOrigin(authority) {
     if (!match) return "https://" + authority;
     const port = match[2] || "";
     if (!Object.hasOwn(HTTP_TWIN, port)) return "https://" + authority;
-    // Без явного порта QR ведёт на веб-порт для телефонов, если он задан (LOCALBOX_PLAYER_PORT —
-    // на SteamOS 80/443 закрыты брандмауэром) или если порт 80 занять не удалось. Если 38202 был
-    // занят, это следующий свободный. Только для локальной сети: на VPS с доменом остаётся порт 80.
-    const web = state.playerPort;
+    // Без явного порта QR ведёт на отдельный веб-порт для телефонов (LOCALBOX_PLAYER_PORT — на SteamOS
+    // 80/443 закрыты брандмауэром), а если его нет и порт 80 занять не удалось — на 38202.
+    // Только для локальной сети: на VPS с доменом остаётся порт 80.
     const bare = port === "" || port === "80" || port === "443";
-    const usePlayerPort = web && bare && network.isLocalHost(match[1]) && (process.env.LOCALBOX_PLAYER_PORT || !state.port80);
-    return "http://" + match[1] + (usePlayerPort ? ":" + web : HTTP_TWIN[port]);
+    const web = state.playerPort || (!state.port80 && state.port38202 ? 38202 : null);
+    return "http://" + match[1] + (web && bare && network.isLocalHost(match[1]) ? ":" + web : HTTP_TWIN[port]);
 }
 
 function roomStatus(room, serverUrl) {

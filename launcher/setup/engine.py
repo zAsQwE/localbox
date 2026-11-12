@@ -233,6 +233,11 @@ class EngineProcess:
         # всё равно апперкейсит код, иначе набранный «игра» не совпадёт с комнатой «Игра».
         from .game_tls import porthole_port
         _porthole = _s.get("porthole_enabled", True) and porthole_port(_s.get("porthole_port", 80))
+        # Подключения не из локальной сети (проброс портов). Иначе сервер решает сам по serverUrl.
+        if _s.get("allow_public", False):
+            env["LOCALBOX_ALLOW_PUBLIC"] = "1"
+        else:
+            env.pop("LOCALBOX_ALLOW_PUBLIC", None)
         if _porthole and _porthole != 80:
             env["LOCALBOX_PORTHOLE_PORT"] = str(_porthole)
             self.on_log(tr('Porthole: дополнительный веб-порт {0} (поделитесь им в Porthole).', _porthole))

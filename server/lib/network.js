@@ -27,14 +27,15 @@ function stringify(value, client, serverUrl) {
     });
 }
 
-// Частные адреса: loopback, RFC 1918, link-local, CGNAT/overlay-VPN (100.64/10), IPv6 ULA/link-local.
+// «Свои» адреса: loopback, RFC 1918, link-local, CGNAT/Tailscale (100.64/10), Hamachi (25/8),
+// Radmin VPN (26/8), IPv6 ULA/link-local.
 function isPrivateAddress(ip) {
     let a = String(ip || "").replace(/^\[|\]$/g, "").toLowerCase();
     if (a.startsWith("::ffff:")) a = a.slice(7);
     if (net.isIPv4(a)) {
         const [x, y] = a.split(".").map(Number);
         return x === 10 || x === 127 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) ||
-            (x === 169 && y === 254) || (x === 100 && y >= 64 && y <= 127);
+            (x === 169 && y === 254) || (x === 100 && y >= 64 && y <= 127) || x === 25 || x === 26;
     }
     if (net.isIPv6(a)) return a === "::1" || /^f[cd]/.test(a) || /^fe[89ab]/.test(a);
     return false;

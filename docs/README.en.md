@@ -53,16 +53,17 @@ A join QR code appears over the game. Details: [Steam Deck](steam-deck.en.md).
 
 ## Network and security
 
-When `serverUrl` is a local-network address, the server accepts connections only from that network; with a
-public address or domain (VPS) it accepts everyone. Admin cheats require an access key, not just a nickname
+When `serverUrl` is a local-network address, the server accepts connections only from that network, from VPNs
+(Radmin VPN, Hamachi, Tailscale) and through Porthole; with a public address or domain (VPS) it accepts everyone.
+For router port forwarding, enable "Accept connections from outside the local network" in Settings. Admin cheats require an access key, not just a nickname
 (see [cheats](cheats.en.md)). Server environment variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `LOCALBOX_ALLOW_PUBLIC` | `1` — accept everyone, `0` — local network only (default: based on `serverUrl`) |
+| `LOCALBOX_ALLOW_PUBLIC` | `1` — accept everyone (same as the launcher checkbox), `0` — local network and VPN only; default: based on `serverUrl` |
 | `LOCALBOX_ALLOWED_ORIGINS` | extra websites (comma-separated) allowed to make requests to the server |
 | `LOCALBOX_ADMIN_KEY` | cheats key; if unset, one is generated at startup and written to the log |
-| `LOCALBOX_PLAYER_PORT` | web port for phones and the QR instead of 80 (the next free one if taken); set by the Steam Deck setup |
+| `LOCALBOX_PLAYER_PORT` | separate web port for phones, also used by the QR (the next free one if taken); 38202 and 38203 always stay. Set by the Steam Deck setup |
 
 ## Updates
 

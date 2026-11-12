@@ -64,12 +64,13 @@ if (localbox.AUTO_START_FULL) console.log("[room] автостарт включ�
 const ALLOW_PUBLIC = process.env.LOCALBOX_ALLOW_PUBLIC ? process.env.LOCALBOX_ALLOW_PUBLIC === "1" : !network.isLocalHost(serverUrl);
 const EXTRA_ORIGINS = new Set((process.env.LOCALBOX_ALLOWED_ORIGINS || "").split(",").map((v) => v.trim()).filter(Boolean));
 function allowedPeer(socket) { return ALLOW_PUBLIC || network.isPrivateAddress(socket.remoteAddress); }
-if (!ALLOW_PUBLIC) console.log("[net] принимаю только локальную сеть (LOCALBOX_ALLOW_PUBLIC=1 — пускать всех)");
+if (!ALLOW_PUBLIC) console.log("[net] принимаю только локальную сеть и VPN (Radmin, Hamachi, Tailscale); проброс портов — галочка «Пускать подключения не из локальной сети» или LOCALBOX_ALLOW_PUBLIC=1");
 
 const app = express();
 app.use((req, res, next) => {
     if (allowedPeer(req.socket)) return next();
-    console.log("[net] отклонён внешний адрес " + req.socket.remoteAddress);
+    console.log("[net] отклонён внешний адрес " + req.socket.remoteAddress +
+        " — чтобы пускать, включите «Пускать подключения не из локальной сети» в настройках или задайте LOCALBOX_ALLOW_PUBLIC=1");
     res.sendStatus(403);
 });
 // Большие тела нужны только рисункам и пользовательскому контенту.
@@ -257,7 +258,10 @@ app.use((req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 
 function onUpgrade(request, socket, head) {
-    if (!allowedPeer(request.socket)) { socket.destroy(); return; }
+    if (!allowedPeer(request.socket)) {
+        console.log("[net] отклонено WebSocket-подключение с " + request.socket.remoteAddress + " — LOCALBOX_ALLOW_PUBLIC=1, чтобы пускать");
+        socket.destroy(); return;
+    }
     // WebSocket может открыть и чужой сайт в браузере игрока — проверяем Origin, если он есть.
     if (!ALLOW_PUBLIC && request.headers.origin && !network.trustedOrigin(request.headers.origin, request, EXTRA_ORIGINS)) {
         console.log("[ws] апгрейд отклонён (чужой Origin):", request.headers.origin); socket.destroy(); return;
@@ -303,10 +307,17 @@ try {
     servers = [
         { s: http.createServer(app), port: 80 },
         { s: https.createServer(ssl, app), port: 443 },
-        // Веб-порт для телефонов. Если занят — берётся следующий свободный (см. state.playerPort).
-        { s: http.createServer(app), port: Number(process.env.LOCALBOX_PLAYER_PORT) || 38202, player: true },
+        { s: http.createServer(app), port: 38202 },
         { s: https.createServer(ssl, app), port: 38203 },
     ];
+    // Отдельный веб-порт для телефонов (LOCALBOX_PLAYER_PORT): 38202 остаётся всегда — он нужен
+    // Blobcast-играм. Если порт занят, берётся следующий свободный; QR ведёт на фактический.
+    const playerPort = Number(process.env.LOCALBOX_PLAYER_PORT || 0);
+    if (Number.isInteger(playerPort) && playerPort >= 1024 && playerPort <= 65535 && playerPort !== 38202 && playerPort !== 38203) {
+        servers.push({ s: http.createServer(app), port: playerPort, player: true });
+    } else if (process.env.LOCALBOX_PLAYER_PORT) {
+        console.error("[net] LOCALBOX_PLAYER_PORT=" + process.env.LOCALBOX_PLAYER_PORT + " не подходит: нужен 1024–65535, кроме 38202/38203");
+    }
     // Porthole: an extra plain-HTTP web port for friends whose port 80 is taken (e.g. 9999).
     // Players get links back to whatever host:port they used, so nothing else changes.
     const portholePort = Number(process.env.LOCALBOX_PORTHOLE_PORT || 0);
@@ -357,8 +368,9 @@ servers.forEach((entry) => {
         // На Android/Termux без root порты 80/443 недоступны (EACCES) — останутся 38202/38203.
         if (err.code === "EACCES") console.error("порт " + port + " без прав недоступен (Android без root / нет setcap) — пропускаю");
         else if (err.code === "EADDRINUSE" && entry.player && ++tries <= 20) {
-            console.error("порт " + port + " занят — пробую " + (port + 1));
-            port += 1; s.listen(port); return;
+            const next = port + 1 + (port + 1 === 38202 ? 2 : port + 1 === 38203 ? 1 : 0);   // свои порты не трогаем
+            console.error("порт " + port + " занят — пробую " + next);
+            port = next; s.listen(port); return;
         }
         else if (err.code === "EADDRINUSE") console.error("порт " + port + " занят — пропускаю");
         else console.error("порт " + port + ": " + err.message + " — пропускаю");
@@ -367,6 +379,7 @@ servers.forEach((entry) => {
         boundPorts++;
         if (entry.player) state.playerPort = port;
         if (port === 80) state.port80 = true;
+        if (port === 38202) state.port38202 = true;
         console.log("LocalBox: порт " + port + (entry.player ? " (для телефонов)" : ""));
     });
     s.listen(port);

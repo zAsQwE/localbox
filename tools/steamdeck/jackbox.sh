@@ -53,7 +53,7 @@ player_site() {
             local url
             url=$(sys curl -s -m 2 http://127.0.0.1:38202/localbox/status http://127.0.0.1/localbox/status 2>/dev/null |
                   grep -oE '"playerUrl":"[^"]+"' | head -1 | cut -d'"' -f4)
-            echo "${url:-http://$(local_ip):38202}  (QR с кодом — поверх лобби)" ;;
+            echo "${url:-http://$(local_ip):38204}  (QR с кодом — поверх лобби)" ;;
         online-ru) echo "https://jackbox.ru" ;;
         online) echo "https://jackbox.fun" ;;
     esac
