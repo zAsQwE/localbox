@@ -40,29 +40,3 @@ Unattended installation:
 In the launcher: **Check for updates → Update to …**. The archive is verified before files are replaced;
 on failure the installation is rolled back. Settings, certificates, the client, voices and music are kept.
 You can also run setup again and choose the same folder.
-
-## For the author: build and release
-
-You need Python 3.10+ and [NSIS](https://nsis.sourceforge.io/Download) (`makensis`) for `setup.exe`:
-
-```sh
-python3 tools/build-installers.py --version v1.2.0
-```
-
-`dist/` then holds `setup.exe`, `setup-linux.run`, `localbox-update.zip` and `SHA256SUMS`.
-Settings, certificates, keys, clients and `node_modules` are not included.
-
-**Testing before publishing.** A normal setup installs the published Release, not your fresh build.
-To install the code inside the installer itself, run `setup.exe /local` or
-`./setup-linux.run --local` and choose an empty folder.
-
-**Release:**
-
-1. The number in `version.json` (or `--version`) must match the tag, e.g. `1.2` and `v1.2.0`.
-2. Attach all four files from `dist/` to the Release.
-3. Publish it without the draft or pre-release marks: the installer skips those.
-4. Test `setup.exe` / `setup-linux.run` from the Release page without switches, and the update from the
-   launcher of an older version.
-
-The Russian client `client-ru.zip` needs to be attached to at least one stable Release: the installer takes the
-newest one. To add it to the build: `--client-ru-archive /path/to/client-ru.zip`.
